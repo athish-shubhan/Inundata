@@ -1,0 +1,35 @@
+{
+  "cv_metrics": {
+    "logistic_regression": {
+      "precision": 0.19987631416202845,
+      "recall": 0.9696969696969697,
+      "f1": 0.30214424951267055,
+      "roc_auc": 0.8243284807473407,
+      "n_folds_used": 3
+    },
+    "random_forest": {
+      "precision": 0.3624338624338624,
+      "recall": 0.37121212121212127,
+      "f1": 0.31851851851851853,
+      "roc_auc": 0.9321298328123181,
+      "n_folds_used": 3
+    }
+  },
+  "selected_model": "random_forest",
+  "n_samples": 480,
+  "n_positive": 21,
+  "feature_importance": {
+    "elev_m": 0.08337018421522788,
+    "slope_deg": 0.016348628012630362,
+    "hand_m": 0.08927005192674732,
+    "river_dist_m": 0.0378007815183753,
+    "rain_flood_mm": 0.12517953374251822,
+    "rain_anomaly_mm": 0.11916682006943924,
+    "ndvi_pre": 0.1323281011058764,
+    "ndwi_pre": 0.2212073910461339,
+    "elev_nbr_mean": 0.06819362617181916,
+    "elev_local_relief": 0.0340276398411302,
+    "hand_nbr_mean": 0.0731072423501021
+  },
+  "caveat": "labels are a proxy derived from Sentinel-2 NDWI change detection (post minus pre-flood), not verified historical flood-extent ground truth; small, spatially imbalanced sample -> treat scores as directional, not calibrated probabilities."
+}

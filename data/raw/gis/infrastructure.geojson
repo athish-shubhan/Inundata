@@ -1,0 +1,308 @@
+{
+  "type": "FeatureCollection",
+  "properties": {
+    "source": "simulated critical-infrastructure register for PoC"
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "infra_1",
+        "kind": "hospital",
+        "name": "hospital_1"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          130.7081,
+          32.78238
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "infra_2",
+        "kind": "hospital",
+        "name": "hospital_2"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          130.69869,
+          32.81509
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "infra_3",
+        "kind": "hospital",
+        "name": "hospital_3"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          130.73388,
+          32.80359
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "infra_4",
+        "kind": "school",
+        "name": "school_4"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          130.75089,
+          32.7558
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "infra_5",
+        "kind": "school",
+        "name": "school_5"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          130.74204,
+          32.75375
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "infra_6",
+        "kind": "school",
+        "name": "school_6"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          130.70089,
+          32.75699
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "infra_7",
+        "kind": "school",
+        "name": "school_7"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          130.78922,
+          32.79245
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "infra_8",
+        "kind": "school",
+        "name": "school_8"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          130.71679,
+          32.76238
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "infra_9",
+        "kind": "school",
+        "name": "school_9"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          130.80373,
+          32.81274
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "infra_10",
+        "kind": "bridge",
+        "name": "bridge_10"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          130.7376,
+          32.80771
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "infra_11",
+        "kind": "bridge",
+        "name": "bridge_11"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          130.69559,
+          32.84763
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "infra_12",
+        "kind": "bridge",
+        "name": "bridge_12"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          130.72475,
+          32.83585
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "infra_13",
+        "kind": "bridge",
+        "name": "bridge_13"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          130.70414,
+          32.76443
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "infra_14",
+        "kind": "evacuation_center",
+        "name": "evacuation_center_14"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          130.78794,
+          32.78085
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "infra_15",
+        "kind": "evacuation_center",
+        "name": "evacuation_center_15"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          130.75979,
+          32.76807
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "infra_16",
+        "kind": "evacuation_center",
+        "name": "evacuation_center_16"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          130.73469,
+          32.81389
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "infra_17",
+        "kind": "evacuation_center",
+        "name": "evacuation_center_17"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          130.69753,
+          32.80477
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "infra_18",
+        "kind": "evacuation_center",
+        "name": "evacuation_center_18"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          130.71472,
+          32.75596
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "infra_19",
+        "kind": "fire_station",
+        "name": "fire_station_19"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          130.74131,
+          32.81804
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "infra_20",
+        "kind": "fire_station",
+        "name": "fire_station_20"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          130.76027,
+          32.78141
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Kuma River (simplified centerline)",
+        "source": "manually digitized for PoC, approximate"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            130.685,
+            32.775
+          ],
+          [
+            130.705,
+            32.778
+          ],
+          [
+            130.722,
+            32.783
+          ],
+          [
+            130.742,
+            32.79
+          ],
+          [
+            130.758,
+            32.795
+          ],
+          [
+            130.77,
+            32.805
+          ],
+          [
+            130.782,
+            32.815
+          ],
+          [
+            130.795,
+            32.828
+          ],
+          [
+            130.805,
+            32.845
+          ]
+        ]
+      }
+    }
+  ]
+}
