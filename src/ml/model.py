@@ -1,5 +1,4 @@
 import joblib
-import numpy as np
 import pandas as pd
 from src.config import DATA_PROC
 from src.ml.features import FEATURE_COLS

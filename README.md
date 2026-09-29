@@ -8,13 +8,13 @@ An independent geospatial flood-intelligence platform. It takes a real disaster 
 
 ## 1. Problem
 
-A regional insurer/infrastructure operator in Kumamoto Prefecture wants to know, after a heavy rainfall event, which of its properties and which critical infrastructure sit in flood-prone terrain along the Kuma River — fast, and in language a risk manager (not a GIS analyst) can act on.
+A regional insurer/infrastructure operator in Kumamoto Prefecture wants to know, after a heavy rainfall event, which of its properties and which critical infrastructure sit in flood-prone terrain along the Kuma River, quickly, and in language a risk manager (not a GIS analyst) can act on.
 
 ## 2. Client (simulated)
 
 **Client:** a mid-size property & casualty insurer with a portfolio of 120 residential/commercial/industrial/agricultural assets in Hitoyoshi City.
 **Business problem:** rapidly triage flood exposure after a rainfall event, without a dedicated GIS team.
-**Client data:** a CSV asset register (`data/raw/client/client_portfolio.csv`) — lat/lon, building type, insured value, year built, occupants.
+**Client data:** a CSV asset register (`data/raw/client/client_portfolio.csv`): lat/lon, building type, insured value, year built, occupants.
 **External data:** SRTM elevation, Open-Meteo rainfall, Sentinel-2 imagery, a digitized river centerline.
 **Question:** *"Assess the flood risk around this region after recent rainfall and identify exposed infrastructure."*
 **Deliverable:** a client-facing markdown risk report, an interactive dashboard, and an API other systems can call.
@@ -26,7 +26,7 @@ A regional insurer/infrastructure operator in Kumamoto Prefecture wants to know,
 data ingestion → geospatial fusion → ML risk model → agentic analysis → API → dashboard
 ```
 
-Five data modalities (terrain, weather, satellite, GIS/vector, client) are fused onto one 480-cell analysis grid over the Kuma River basin. A Random Forest trained on that grid predicts a flood-susceptibility score; an LLM-capable agent (with a fully-functional deterministic fallback) turns a plain-English request into a structured, honest client report by calling deterministic tools — it never computes a number itself.
+Five data modalities (terrain, weather, satellite, GIS/vector, client) are fused onto one 480-cell analysis grid over the Kuma River basin. A Random Forest trained on that grid predicts a flood-susceptibility score; an LLM-capable agent (with a fully-functional deterministic fallback) turns a plain-English request into a structured, honest client report by calling deterministic tools; it never computes a number itself.
 
 ## 4. Architecture
 
@@ -38,8 +38,8 @@ See [`docs/data_sources.md`](docs/data_sources.md) for the full source/license/r
 
 - **Elevation:** SRTM 90m, real, via OpenTopoData.
 - **Weather:** real daily rainfall, Open-Meteo historical archive, 3 stations IDW-interpolated (2020-07-01–10 flood window vs. a 2020-06-01–10 baseline).
-- **Satellite:** real Sentinel-2 L2A surface reflectance (bands B03/B04/B08/B11 + SCL), pre-flood (2020-05-11) and post-flood (2020-08-29), pulled directly from the public `sentinel-cogs` bucket via windowed COG reads — no download of full tiles.
-- **GIS:** a simplified, hand-digitized Kuma River centerline (Overpass/OSM was unreachable from this sandbox — documented limitation) and a simulated critical-infrastructure register.
+- **Satellite:** real Sentinel-2 L2A surface reflectance (bands B03/B04/B08/B11 + SCL), pre-flood (2020-05-11) and post-flood (2020-08-29), pulled directly from the public `sentinel-cogs` bucket via windowed COG reads instead of downloading full tiles.
+- **GIS:** a simplified, hand-digitized Kuma River centerline (Overpass/OSM was unreachable from this sandbox, a documented limitation) and a simulated critical-infrastructure register.
 - **Client:** a simulated 120-asset property portfolio.
 
 ## 6. Geospatial processing
@@ -47,8 +47,8 @@ See [`docs/data_sources.md`](docs/data_sources.md) for the full source/license/r
 - CRS reprojection between WGS84 (`EPSG:4326`), UTM 52N (Sentinel-2 native), and a metric CRS (`EPSG:6690`) for distance calculations.
 - Windowed, on-the-fly reprojection of cloud-optimized GeoTIFFs (`rasterio.warp.reproject`) instead of full-tile downloads.
 - Geometry validation and auto-repair (`buffer(0)`) in the ingestion layer.
-- Distance-to-river and Height-Above-Nearest-Drainage (HAND) — a standard hydrological terrain proxy for flood susceptibility.
-- Zonal/neighborhood statistics (3×3 window mean and local relief) — real spatial aggregation, not just raw lat/lon.
+- Distance-to-river and Height-Above-Nearest-Drainage (HAND), a standard hydrological terrain proxy for flood susceptibility.
+- Zonal/neighborhood statistics (3×3 window mean and local relief), real spatial aggregation rather than raw lat/lon.
 - IDW spatial interpolation of point rainfall observations onto the analysis grid.
 
 ## 7. Remote sensing
@@ -61,7 +61,7 @@ NDWI and NDVI computed from real Sentinel-2 reflectance; NDWI change detection (
 
 ## 9. Machine learning
 
-Two models are compared with **spatial** `GroupKFold` cross-validation (not random splits — adjacent grid cells are spatially autocorrelated):
+Two models are compared with **spatial** `GroupKFold` cross-validation, not random splits, since adjacent grid cells are spatially autocorrelated:
 
 | model | precision | recall | F1 | ROC-AUC |
 |---|---|---|---|---|
@@ -70,7 +70,7 @@ Two models are compared with **spatial** `GroupKFold` cross-validation (not rand
 
 *(regenerate with `python scripts/run_pipeline.py`; numbers above are from this repo's own last run, not fabricated.)*
 
-**Honest caveat, stated everywhere this model's output appears:** the label is a proxy (Sentinel-2 NDWI increase > 0.04, pre vs. post flood), not a verified historical flood-extent inventory, and the positive class is small (21/480 cells). Treat scores as directional risk ranking, not calibrated probabilities. Error analysis (`src/ml/evaluate.py`, in-sample) is used only to inspect *where* the model disagrees, not to claim generalization — the CV table above is the honest generalization estimate.
+**Caveat, stated everywhere this model's output appears:** the label is a proxy (Sentinel-2 NDWI increase > 0.04, pre vs. post flood), not a verified historical flood-extent inventory, and the positive class is small (21/480 cells). Treat scores as directional risk ranking, not calibrated probabilities. Error analysis (`src/ml/evaluate.py`, in-sample) is used only to inspect *where* the model disagrees, not to claim generalization; the CV table above is the reported generalization estimate.
 
 ## 10. Spatial AI
 
@@ -78,7 +78,7 @@ Beyond raw coordinates: Height-Above-Nearest-Drainage, geodesic distance-to-rive
 
 ## 11. Agentic workflow
 
-`src/agents/agent.py` implements a real Claude tool-calling loop (`llm_report`) using four read-only tools (`get_region_info`, `assess_region`, `list_exposed_assets`, `get_model_metrics`, defined in `src/agents/tools.py` with JSON schemas) plus a fully-functional **deterministic fallback** (`deterministic_report`) used automatically when `ANTHROPIC_API_KEY` is unset — which is how this repo runs out of the box, and how it was verified end-to-end (see §17). Both paths call the exact same tools and produce identical numbers; only the report's phrasing differs. Every tool call is logged with latency (`tool_log`), the LLM loop is capped at 8 tool calls, and the agent's toolset is a fixed whitelist of read-only functions — it cannot execute shell commands or write files.
+`src/agents/agent.py` implements a real Claude tool-calling loop (`llm_report`) using four read-only tools (`get_region_info`, `assess_region`, `list_exposed_assets`, `get_model_metrics`, defined in `src/agents/tools.py` with JSON schemas) plus a fully-functional **deterministic fallback** (`deterministic_report`) used automatically when `ANTHROPIC_API_KEY` is unset. This is how the repo runs out of the box, and how it was verified end-to-end (see §17). Both paths call the exact same tools and produce identical numbers; only the report's phrasing differs. Every tool call is logged with latency (`tool_log`), the LLM loop is capped at 8 tool calls, and the agent's toolset is a fixed whitelist of read-only functions; it cannot execute shell commands or write files.
 
 Example query the agent handles: *"Assess the flood risk around downtown Hitoyoshi after recent rainfall and identify exposed infrastructure within 2km."*
 
@@ -122,36 +122,36 @@ docker compose up --build
 
 ## 16. Example workflow
 
-1. Open the dashboard, **Risk Map** tab — see 39 of 480 grid cells at risk-score ≥ 0.5, concentrated near the river.
+1. Open the dashboard's **Risk Map** tab: 39 of 480 grid cells sit at risk-score ≥ 0.5, concentrated near the river.
 2. Click a point near downtown Hitoyoshi.
 3. Go to **AI Analyst**, the click pre-fills a query; hit **Run analysis**.
-4. Get a markdown report: risk band, driving features (elevation, HAND, distance-to-river, rainfall), top 5 exposed assets by value and risk, model caveats, recommended actions — downloadable, and reproducible via the same call to `POST /agent/analyze`.
+4. Get a markdown report: risk band, driving features (elevation, HAND, distance-to-river, rainfall), top 5 exposed assets by value and risk, model caveats, recommended actions, downloadable and reproducible via the same call to `POST /agent/analyze`.
 
-## 17. Results (this repo's own last run — not fabricated)
+## 17. Results (this repo's own last run, not fabricated)
 
-- Pipeline (fusion → train → evaluate) completes in **~4.6s** on a 480-cell grid.
+- Pipeline (fusion → train → evaluate) completes in **under 5s** on a 480-cell grid.
 - Selected model: **random_forest**, spatial-CV F1 = 0.32, ROC-AUC = 0.93 (see caveat in §9).
-- **35/35 pytest tests pass** across ingestion, geospatial, ML, agent, and API layers (`python -m pytest -q`).
-- API, agent (deterministic-fallback mode), and dashboard were all exercised live during development — see §18 for what was and wasn't verified.
+- **36/36 pytest tests pass** across ingestion, geospatial, ML, agent, and API layers (`python -m pytest -q`).
+- API, agent (deterministic-fallback mode), and dashboard were all exercised live during development; see §18 for what was and wasn't verified.
 
 ## 18. Verification performed
 
 - ✅ `scripts/fetch_data.py` and `scripts/fetch_satellite.py` run against real public APIs and produced the committed `data/raw/*`.
 - ✅ `scripts/run_pipeline.py` runs end-to-end and produced the committed `data/processed/*`.
-- ✅ `pytest` — 35/35 passing.
+- ✅ `pytest`: 36/36 passing.
 - ✅ FastAPI server started and every endpoint (including `/ingest` with a real CSV and an error case) was hit with `curl` and returned expected responses.
 - ✅ Streamlit dashboard was opened in a real browser; all five tabs, including running a live agent query, were clicked through and screenshotted.
-- ⚠️ **LLM tool-calling path** (`llm_report` in `src/agents/agent.py`) is implemented against the documented Anthropic Messages API tool-use format but was **not exercised live** in this environment (no `ANTHROPIC_API_KEY` was configured). The deterministic fallback — which shares the same tools and produces the same numbers — was fully verified instead. Set `ANTHROPIC_API_KEY` and re-run to exercise the real LLM path.
+- ⚠️ **LLM tool-calling path** (`llm_report` in `src/agents/agent.py`) is implemented against the documented Anthropic Messages API tool-use format but was **not exercised live** in this environment (no `ANTHROPIC_API_KEY` was configured). The deterministic fallback, which shares the same tools and produces the same numbers, was fully verified instead. Set `ANTHROPIC_API_KEY` and re-run to exercise the real LLM path.
 - ⚠️ **Docker build was attempted and did not complete in this environment.** It hung indefinitely (zero CPU progress for 20+ minutes) on this machine's `colima`-based Docker backend and was killed rather than left running; this looks like a local VM/networking issue with this particular Docker setup, not a `Dockerfile` correctness issue, but it was **not verified end-to-end**. If you hit the same thing, try `docker compose build --no-cache` on a native Docker Desktop / Linux host, or run the app directly via the venv instructions in §14–15, which were fully verified.
 
 ## 19. Limitations
 
-- Grid resolution (~650m) is coarse for parcel-level decisions — appropriate for regional triage only.
+- Grid resolution (~650m) is coarse for parcel-level decisions, appropriate for regional triage only.
 - ML label is a remote-sensing proxy, not verified flood-extent ground truth (see §9, §7).
 - River geometry is hand-digitized and approximate, not OSM-sourced (Overpass unreachable in this sandbox).
 - Client and infrastructure data are simulated.
 - Single-AOI PoC: the deterministic agent NLU (`PLACES` dict) only knows this AOI's landmarks; the real LLM path generalizes better since Claude parses free text itself.
-- Small, imbalanced training set (21 positive / 480 total) — metrics should be read directionally.
+- Small, imbalanced training set (21 positive / 480 total); metrics should be read directionally.
 
 ## 20. Future work
 
@@ -168,23 +168,23 @@ docker compose up --build
 | Capability | Evidence in this repo |
 |---|---|
 | Python | Entire codebase; type-hinted, tested |
-| Data analytics / ML | `src/ml/` — two models compared, spatial CV, feature importance, error analysis |
-| Geospatial data processing | `src/geo/` — CRS reprojection, raster resampling, zonal stats, distance calc |
+| Data analytics / ML | `src/ml/`: two models compared, spatial CV, feature importance, error analysis |
+| Geospatial data processing | `src/geo/`: CRS reprojection, raster resampling, zonal stats, distance calc |
 | Remote sensing / satellite data | Real Sentinel-2 NDWI/NDVI + change detection (`src/geo/indices.py`) |
 | Weather data | Real Open-Meteo historical rainfall, IDW-interpolated (`src/geo/weather.py`) |
 | GIS data | River centerline + infrastructure GeoJSON, `src/ingestion/geojson_source.py` |
-| Multimodal data fusion | `src/geo/fusion.py` — 5 modalities → 1 feature table |
+| Multimodal data fusion | `src/geo/fusion.py`: 5 modalities into 1 feature table |
 | Spatial AI | HAND, distance-to-river, neighborhood features, spatial CV (`src/ml/features.py`) |
-| LLM / agentic workflows | `src/agents/agent.py` — real Claude tool-calling loop + verified deterministic fallback |
-| Automated ingestion, heterogeneous client data | `src/ingestion/` — CSV/GeoJSON/GeoTIFF, validation, `client_adapter.py` registry |
-| FastAPI | `src/api/main.py` — 8 endpoints, Pydantic, OpenAPI |
-| Dashboard / rapid prototyping | `dashboard/app.py` — 5-tab Streamlit app, verified live in-browser |
-| Client-facing communication | Agent's markdown report; this README's §2–3 |
+| LLM / agentic workflows | `src/agents/agent.py`: real Claude tool-calling loop plus a verified deterministic fallback |
+| Automated ingestion, heterogeneous client data | `src/ingestion/`: CSV/GeoJSON/GeoTIFF, validation, `client_adapter.py` registry |
+| FastAPI | `src/api/main.py`: 8 endpoints, Pydantic, OpenAPI |
+| Dashboard / rapid prototyping | `dashboard/app.py`: 5-tab Streamlit app, verified live in-browser |
+| Client-facing communication | Agent's markdown report; this README's §2-3 |
 | Technical documentation | `docs/architecture.md`, `docs/data_sources.md`, `docs/design_notes.md` |
-| Independent problem definition | AOI, use case, label design, and model choice were all made without external input — documented with reasoning throughout |
+| Independent problem definition | AOI, use case, label design, and model choice were made without external input, documented with reasoning throughout |
 
-Built by Athish Shubhan — see `docs/design_notes.md` for the engineering rationale behind each design decision.
+Built by Athish Shubhan. See `docs/design_notes.md` for the reasoning behind each design decision.
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE).
+MIT. See [`LICENSE`](LICENSE).

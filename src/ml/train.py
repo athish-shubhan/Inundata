@@ -9,7 +9,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import GroupKFold
 from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score
 from src.config import DATA_PROC
-from src.ml.features import FEATURE_COLS, LABEL_COL, spatial_groups, Xy
+from src.ml.features import FEATURE_COLS, spatial_groups, Xy
 
 MODELS = {
     "logistic_regression": Pipeline([("sc", StandardScaler()), ("clf", LogisticRegression(class_weight="balanced", max_iter=1000))]),

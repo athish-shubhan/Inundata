@@ -39,7 +39,7 @@ def array_to_rgba(arr, cmap, vmin, vmax):
     rgba[np.isnan(arr)] = [0, 0, 0, 0]
     return rgba
 
-st.title("Inundata — Kuma River Basin Flood Intelligence")
+st.title("Inundata: Kuma River Basin Flood Intelligence")
 st.caption("Simulated client engagement · Hitoyoshi, Kumamoto, Japan · July 2020 flood disaster")
 
 region = get_region_info()
@@ -83,10 +83,10 @@ with tab_map:
         st.session_state["clicked"] = out["last_clicked"]
 
 with tab_sat:
-    st.subheader("Sentinel-2 NDWI — before vs. after the July 2020 flood")
+    st.subheader("Sentinel-2 NDWI: before vs. after the July 2020 flood")
     st.caption("Pre-flood: 2020-05-11 (1.2% cloud) · Post-flood: 2020-08-29 (1.0% cloud). "
                "Optical imagery cannot see through the storm clouds present during the flood peak (2020-07-04); "
-               "this compares standing-water/moisture signature before vs. seven weeks after the event — a documented limitation.")
+               "this compares standing-water/moisture signature before vs. seven weeks after the event, a documented limitation.")
     w1, w2, lats, lons = get_ndwi_pair()
     c1, c2, c3 = st.columns(3)
     for col, arr, title in [(c1, w1, "Pre-flood NDWI"), (c2, w2, "Post-flood NDWI"), (c3, w2 - w1, "Change (post − pre)")]:

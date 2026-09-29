@@ -1,6 +1,6 @@
 import re
 import time
-from src.agents.tools import TOOL_SPECS, DISPATCH, call_tool, get_region_info, assess_region, list_exposed_assets, get_model_metrics
+from src.agents.tools import TOOL_SPECS, DISPATCH, call_tool
 from src.agents.llm import has_llm, client, SYSTEM_PROMPT
 from src.config import LLM_MODEL
 
@@ -40,7 +40,7 @@ def deterministic_report(query: str) -> dict:
     band = "HIGH" if risk["risk_score"] >= 0.5 else ("MODERATE" if risk["risk_score"] >= 0.2 else "LOW")
     top_assets = assets["assets"][:5]
     lines = [
-        f"# Flood Risk Assessment — {region['name']}", "",
+        f"# Flood Risk Assessment: {region['name']}", "",
         f"**Query:** {query}", "",
         "## Summary",
         f"Estimated flood-susceptibility risk at ({parsed['lat']:.3f}, {parsed['lon']:.3f}) is **{band}** "
@@ -55,7 +55,7 @@ def deterministic_report(query: str) -> dict:
     ]
     if top_assets:
         for a in top_assets:
-            lines.append(f"- {a['asset_id']} ({a['building_type']}, ¥{a['value_jpy']:,}) — {a['dist_km']} km away, risk {a['risk_score']}")
+            lines.append(f"- {a['asset_id']} ({a['building_type']}, ¥{a['value_jpy']:,}), {a['dist_km']} km away, risk {a['risk_score']}")
     else:
         lines.append("- No client assets registered within the search radius.")
     lines += [

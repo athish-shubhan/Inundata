@@ -1,4 +1,4 @@
-from src.config import ANTHROPIC_API_KEY, LLM_MODEL
+from src.config import ANTHROPIC_API_KEY
 
 SYSTEM_PROMPT = """You are Inundata's flood-risk analyst agent for the Kuma River basin.
 You never compute numbers yourself. For any risk score, statistic, or asset list, you MUST call a tool.

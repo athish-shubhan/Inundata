@@ -1,4 +1,3 @@
-import pandas as pd
 from sklearn.metrics import confusion_matrix, classification_report
 from src.config import DATA_PROC
 from src.ml.model import RiskModel

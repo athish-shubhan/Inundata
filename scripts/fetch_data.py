@@ -2,7 +2,7 @@ import sys, json, time, csv
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import requests
-from src.config import *
+from src.config import DATA_RAW, LAT_MIN, LAT_MAX, LON_MIN, LON_MAX, GRID_STEP, FLOOD_EVENT_START, FLOOD_EVENT_END, BASELINE_START, BASELINE_END
 
 def grid_points():
     lats = [round(LAT_MIN + i * GRID_STEP, 5) for i in range(int((LAT_MAX - LAT_MIN) / GRID_STEP) + 1)]

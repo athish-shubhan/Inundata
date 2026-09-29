@@ -4,11 +4,11 @@ This project explores whether real public satellite, weather, and terrain data c
 
 ## Summary
 
-A flood-risk assessment platform for the Kuma River basin in Japan — the site of a major 2020 flood disaster. It fuses real SRTM elevation, real historical rainfall, and real Sentinel-2 satellite imagery with a simulated client property portfolio, trains a spatially-validated ML model, and lets a non-technical user ask a plain-English question like "assess flood risk after recent rainfall" and get back a client-facing report — through an agent that only narrates, never calculates, so every number is traceable to a deterministic tool call.
+A flood-risk assessment platform for the Kuma River basin in Japan, the site of a major 2020 flood disaster. It fuses real SRTM elevation, real historical rainfall, and real Sentinel-2 satellite imagery with a simulated client property portfolio, trains a spatially-validated ML model, and lets a non-technical user ask a plain-English question like "assess flood risk after recent rainfall" and get back a client-facing report, through an agent that only narrates and never calculates, so every number is traceable to a deterministic tool call.
 
 ## Overview
 
-Start from the underlying problem: an insurer wants to triage flood exposure fast, without a GIS team. A real, well-documented flood event was chosen so the pipeline could be validated against reality instead of inventing numbers. Five data modalities — terrain, weather, satellite, GIS vector data, and client data — get fused onto one spatial grid. A Random Forest, chosen after comparing against logistic regression with *spatial* cross-validation (not random splits, because neighboring grid cells are correlated), scores flood susceptibility. That model backs three interfaces that all share the same code: a FastAPI service, a Streamlit dashboard, and an LLM agent that calls read-only tools and narrates the results — with a deterministic fallback so the whole thing runs without any API key.
+Start from the underlying problem: an insurer wants to triage flood exposure fast, without a GIS team. A real, well-documented flood event was chosen so the pipeline could be validated against reality instead of inventing numbers. Five data modalities (terrain, weather, satellite, GIS vector data, and client data) get fused onto one spatial grid. A Random Forest, chosen after comparing against logistic regression with *spatial* cross-validation (not random splits, because neighboring grid cells are correlated), scores flood susceptibility. That model backs three interfaces that all share the same code: a FastAPI service, a Streamlit dashboard, and an LLM agent that calls read-only tools and narrates the results, with a deterministic fallback so the whole thing runs without any API key.
 
 ## Technical walkthrough
 
@@ -16,19 +16,19 @@ AOI selection and why (real disaster, real data, tractable scope) → ingestion 
 
 ## Architecture rationale
 
-See `docs/architecture.md` for the diagram. The key idea: three surfaces (API, dashboard, agent) all import the same `RiskModel` and the same `src/agents/tools.py` functions, so there is exactly one source of truth for any number the system produces — the dashboard and the agent cannot disagree.
+See `docs/architecture.md` for the diagram. The key idea: three surfaces (API, dashboard, agent) all import the same `RiskModel` and the same `src/agents/tools.py` functions, so there is exactly one source of truth for any number the system produces. The dashboard and the agent cannot disagree.
 
 ## Hardest problem solved
 
-Getting genuine before/after satellite change detection without a paid API or credentials. The public Earth Search STAC API was used to search Sentinel-2 L2A metadata, picking the lowest-cloud scenes bracketing the flood, then doing windowed reads directly off the public `sentinel-cogs` S3 bucket with `rasterio` (no full-tile download, no auth). The catch: optical imagery can't see through the storm clouds present *during* the actual flood peak, so the "before/after" comparison is really "before vs. seven weeks after" — documented explicitly rather than implying the model sees the flood itself.
+Getting genuine before/after satellite change detection without a paid API or credentials. The public Earth Search STAC API was used to search Sentinel-2 L2A metadata, picking the lowest-cloud scenes bracketing the flood, then doing windowed reads directly off the public `sentinel-cogs` S3 bucket with `rasterio` (no full-tile download, no auth). The catch: optical imagery can't see through the storm clouds present *during* the actual flood peak, so the "before/after" comparison is really "before vs. seven weeks after," documented explicitly rather than implying the model sees the flood itself.
 
 ## Key trade-off
 
-Using an NDWI-change proxy label instead of either (a) fabricating flood-extent ground truth, or (b) not building an ML component at all. The choice was to build something real and be explicit about what it can and can't claim, rather than either extreme. The honest cost: reported metrics (F1=0.32 for the selected model) look modest next to what a marketing-oriented demo might show — that's the right trade for a technical audience.
+Using an NDWI-change proxy label instead of either (a) fabricating flood-extent ground truth, or (b) not building an ML component at all. The choice was to build something real and be explicit about what it can and can't claim, rather than either extreme. The honest cost: reported metrics (F1=0.32 for the selected model) look modest next to what a marketing-oriented demo might show; that's the right trade for a technical audience.
 
 ## ML approach
 
-Two models, spatial cross-validation, and metrics chosen for an imbalanced classification problem (precision/recall/F1/ROC-AUC, not accuracy — 96% accuracy is trivial here since only 4.4% of cells are positive). Random forest won on F1 and ROC-AUC. In-sample error analysis is run separately from the CV metrics and both are labeled clearly, since conflating them is a common way to accidentally overstate model quality.
+Two models, spatial cross-validation, and metrics chosen for an imbalanced classification problem (precision/recall/F1/ROC-AUC, not accuracy: 96% accuracy is trivial here since only 4.4% of cells are positive). Random forest won on F1 and ROC-AUC. In-sample error analysis is run separately from the CV metrics and both are labeled clearly, since conflating them is a common way to accidentally overstate model quality.
 
 ## Geospatial approach
 
@@ -40,23 +40,23 @@ Each modality lands on the same analysis grid through a different mechanism appr
 
 ## Agent design
 
-The agent is a tool-calling loop, not a chatbot bolted onto the project. It has exactly four tools, all read-only and all backed by the same deterministic pipeline the API uses. The loop is capped at 8 tool calls and the tool dispatch table is whitelisted as a basic safeguard. When there's no API key, a deterministic template narrator produces the identical structure from the identical tool calls — built specifically so the project is fully verifiable without requiring anyone to hand over a paid API key.
+The agent is a tool-calling loop, not a chatbot bolted onto the project. It has exactly four tools, all read-only and all backed by the same deterministic pipeline the API uses. The loop is capped at 8 tool calls and the tool dispatch table is whitelisted as a basic safeguard. When there's no API key, a deterministic template narrator produces the identical structure from the identical tool calls. This was built specifically so the project is fully verifiable without requiring anyone to hand over a paid API key.
 
 ## Ingestion / handling messy client data
 
-`src/ingestion` returns a structured `IngestReport` (errors vs. warnings vs. metadata) instead of raising on the first problem, so a caller can see *everything* wrong with a file at once — missing columns, duplicate IDs, invalid/null geometry (auto-repaired with `buffer(0)` where possible), and CRS mismatches (auto-reprojected). Adding a new client format means writing one small loader function and registering it in `client_adapter.LOADERS` — demonstrated by having CSV, GeoJSON/Shapefile, and GeoTIFF all working through the same registry.
+`src/ingestion` returns a structured `IngestReport` (errors vs. warnings vs. metadata) instead of raising on the first problem, so a caller can see *everything* wrong with a file at once: missing columns, duplicate IDs, invalid/null geometry (auto-repaired with `buffer(0)` where possible), and CRS mismatches (auto-reprojected). Adding a new client format means writing one small loader function and registering it in `client_adapter.LOADERS`. CSV, GeoJSON/Shapefile, and GeoTIFF all work through the same registry today.
 
 ## Limitations
 
 - Proxy ML label, not verified flood-extent ground truth.
 - Hand-digitized river line, not OSM-sourced (Overpass unreachable in this environment).
-- ~650m grid — regional triage, not parcel-level.
+- ~650m grid: regional triage, not parcel-level.
 - Simulated client/infrastructure data.
 - LLM tool-calling path implemented but not live-tested without an API key in this environment (deterministic fallback was fully verified instead).
 
 ## Future improvements
 
-SAR-based flood detection, multi-AOI support, a real flood-extent training label, model registry for scale — see README §20.
+SAR-based flood detection, multi-AOI support, a real flood-extent training label, model registry for scale; see README §20.
 
 ## Frequently asked questions
 
@@ -64,10 +64,10 @@ SAR-based flood detection, multi-AOI support, a real flood-extent training label
 
 **Why not just use accuracy?** The label is 4.4% positive; a model predicting "no flood risk" everywhere gets ~96% accuracy and is useless. Precision/recall/F1/ROC-AUC are the honest metrics for this imbalance.
 
-**How do you know the CV isn't leaking?** `GroupKFold` over coarse spatial blocks (not `KFold`/random split) is used specifically because adjacent grid cells share almost identical terrain/rainfall features — a random split would put near-duplicate cells in train and test.
+**How do you know the CV isn't leaking?** `GroupKFold` over coarse spatial blocks (not `KFold`/random split) is used specifically because adjacent grid cells share almost identical terrain/rainfall features; a random split would put near-duplicate cells in train and test.
 
 **What would break first at national scale?** The in-memory `features.csv` + single-process `RiskModel` in the API (see `docs/architecture.md`, Scalability). A real deployment would need tiled raster storage and a proper model-serving layer.
 
-**How do you stop the LLM from hallucinating a risk score?** It can't produce one — the tool schema only returns numbers from deterministic function calls, and the system prompt explicitly instructs the model to never compute statistics itself. A production version would add an automated check that flags any numeric token in the final report not traceable to a tool result.
+**How do you stop the LLM from hallucinating a risk score?** It can't produce one: the tool schema only returns numbers from deterministic function calls, and the system prompt explicitly instructs the model to never compute statistics itself. A production version would add an automated check that flags any numeric token in the final report not traceable to a tool result.
 
-**Why Hitoyoshi specifically?** A real, well-documented, moderately-scoped flood event with genuinely fetchable public data (SRTM, Open-Meteo, Sentinel-2) — lets the pipeline be validated against something real instead of a synthetic AOI, without needing a paid data source.
+**Why Hitoyoshi specifically?** A real, well-documented, moderately-scoped flood event with genuinely fetchable public data (SRTM, Open-Meteo, Sentinel-2). That lets the pipeline be validated against something real instead of a synthetic AOI, without needing a paid data source.

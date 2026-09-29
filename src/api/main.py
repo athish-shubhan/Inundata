@@ -3,7 +3,6 @@ import tempfile
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-import pandas as pd
 from src.config import DATA_PROC
 from src.agents.tools import get_region_info, assess_region, list_exposed_assets, get_model_metrics
 from src.agents.agent import run_agent
@@ -23,7 +22,7 @@ def rm() -> RiskModel:
     global _rm
     if _rm is None:
         if not (DATA_PROC / "model.pkl").exists():
-            raise HTTPException(503, "model not trained yet — run scripts/run_pipeline.py")
+            raise HTTPException(503, "model not trained yet, run scripts/run_pipeline.py")
         _rm = RiskModel()
     return _rm
 
@@ -57,7 +56,7 @@ def exposed(lat: float, lon: float, radius_km: float = 2.0):
 @app.get("/model/metrics")
 def metrics():
     if not (DATA_PROC / "metrics.json").exists():
-        raise HTTPException(503, "metrics not available — train the model first")
+        raise HTTPException(503, "metrics not available, train the model first")
     return get_model_metrics()
 
 @app.get("/grid")
