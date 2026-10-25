@@ -2,75 +2,82 @@
 
 ```
                  ┌─────────────────────────────────────────────────────┐
-                 │                     data/raw/                       │
-                 │  terrain (SRTM) · weather (Open-Meteo) · satellite  │
-                 │  (Sentinel-2) · gis (river, infra) · client (CSV)   │
+                 │   config/hitoyoshi.json  (bbox, CRS, 30 m, dates,   │
+                 │   scene URLs, GSI tiles, named places)              │
                  └───────────────────────┬─────────────────────────────┘
-                                          │ src/ingestion/*
-                                          │ (schema, CRS, geometry, dup checks)
+                                          │ scripts/fetch_data.py (idempotent, retry/backoff)
+                                          ▼
+                 ┌─────────────────────────────────────────────────────┐
+                 │                data/hitoyoshi/raw/                  │
+                 │  terrain (Copernicus DEM) · satellite (Sentinel-2)  │
+                 │  reference (GSI flood mask) · gis (OSM river,       │
+                 │  infrastructure) · weather · client portfolio       │
+                 └───────────────────────┬─────────────────────────────┘
                                           ▼
                  ┌─────────────────────────────────────────────────────┐
                  │                    src/geo/                         │
-                 │  terrain.py   → DEM grid, slope                     │
-                 │  indices.py   → river distance, HAND, NDWI/NDVI     │
-                 │  weather.py   → IDW rainfall interpolation          │
-                 │  zonal.py     → point-in-raster sampling            │
-                 │  fusion.py    → joins everything into one grid      │
+                 │  grid.py      → one 30 m UTM grid, warp, stack I/O  │
+                 │  terrain.py   → DEM, slope, TPI, river mask/dist    │
+                 │  hydrology.py → fill, D8, flow accumulation, HAND   │
+                 │  indices.py   → NDWI/NDVI/NDBI, SCL cloud mask      │
+                 │  weather.py   → event rainfall (context only)       │
+                 │  fusion.py    → predictors + label + diagnostics    │
                  └───────────────────────┬─────────────────────────────┘
-                                          │ data/processed/features.csv
+                                          │ processed/features.tif (15 named bands)
                                           ▼
                  ┌─────────────────────────────────────────────────────┐
                  │                    src/ml/                          │
-                 │  features.py  → predictor columns, spatial CV groups│
-                 │  train.py     → LogisticRegression vs RandomForest, │
-                 │                 spatial GroupKFold, metrics.json    │
-                 │  model.py     → RiskModel: predict_point/_grid      │
-                 │  evaluate.py  → confusion matrix, error_analysis.csv│
+                 │  features.py  → predictor list, scorable cells,     │
+                 │                 2 km spatial blocks                 │
+                 │  train.py     → 4 models, spatial + random CV,      │
+                 │                 calibration, proxy-label check      │
+                 │  evaluate.py  → out-of-fold error analysis          │
+                 │  model.py     → RiskModel: raster lookups           │
                  └───────────────────────┬─────────────────────────────┘
-                                          │ data/processed/model.pkl
+                                          │ processed/risk.tif · metrics.json · model.joblib
                                           ▼
         ┌────────────────────┐  ┌────────────────────────────────────┐
         │   src/agents/       │  │            src/api/                │
-        │  tools.py  (4 tools)│◄─┤  FastAPI: /predict /assets/exposed  │
-        │  agent.py  (LLM loop│  │  /agent/analyze /ingest /grid /...  │
+        │  tools.py  (6 tools)│◄─┤  FastAPI: /predict /assets/exposed  │
+        │  agent.py  (LLM loop│  │  /infrastructure/exposed /grid ...  │
         │   + deterministic   │  │  Pydantic validation, timing        │
         │   fallback)         │  │  middleware, OpenAPI docs           │
         └──────────┬───────────┘  └───────────────┬────────────────────┘
-                   │                               │
                    └───────────────┬───────────────┘
                                     ▼
                        ┌─────────────────────────┐
                        │   dashboard/app.py       │
-                       │  Streamlit, 5 tabs:      │
-                       │  map · satellite change  │
-                       │  · model perf · client   │
-                       │  data/ingest · AI analyst│
+                       │  Streamlit, 5 tabs       │
                        └─────────────────────────┘
 ```
 
 ## Component responsibilities
 
-- **`src/ingestion`** holds format-agnostic loaders (CSV, GeoJSON/Shapefile, GeoTIFF) behind a small registry (`client_adapter.py`), each returning an `IngestReport` (errors/warnings/metadata) instead of silently failing. Onboarding a new client dataset means calling `ingest_client_dataset(path)`; no new code is required unless the format itself is new.
-- **`src/geo`** holds all geospatial transforms: CRS reprojection, raster resampling (`rasterio.warp.reproject`), distance-to-geometry, terrain derivatives (slope, HAND), and the fusion step that joins five data modalities onto one regular grid.
-- **`src/ml`** holds feature/label definitions and training with **spatial** cross-validation (`GroupKFold` over coarse lat/lon blocks, not random splits, since adjacent grid cells are spatially autocorrelated and a random split would leak), plus a thin `RiskModel` inference wrapper used by both the API and the agent tools.
-- **`src/agents`**: `tools.py` defines four read-only, deterministic functions (region info, point risk, exposed assets, model metrics) as both plain Python callables and Anthropic tool-use JSON schemas. `agent.py` runs a real Claude tool-calling loop when `ANTHROPIC_API_KEY` is set, or a deterministic template narrator when it isn't. Both paths call the same tools and produce numbers from the same deterministic pipeline; only the phrasing differs.
-- **`src/api`** wraps the same tools/model used by the agent and dashboard, so all three surfaces (API, agent, dashboard) stay consistent because they share one code path.
-- **`dashboard`** imports `src` directly (no network hop) for local iteration speed; in `docker-compose.yml` it instead calls the API service, appropriate for a multi-user deployment.
+- **`config/`** holds the study area as data. `src/config.py` reads the file named by `INUNDATA_AOI` (default `config/hitoyoshi.json`) and derives every path from its `id`, so a second AOI is a second JSON file, not a code change.
+- **`src/ingestion`** holds format-agnostic loaders (CSV, GeoJSON/Shapefile, GeoTIFF) behind a small registry (`client_adapter.py`), each returning an `IngestReport` (errors/warnings/metadata) instead of failing on the first problem.
+- **`src/geo`** does all spatial work on one grid. `grid.analysis_grid()` snaps the AOI to a 30 m UTM raster; `warp()` puts any input on it with an explicit resampling choice; `write_stack`/`read_stack` keep every layer in one named-band GeoTIFF. `hydrology.py` routes flow on a DEM padded by 100 cells so catchments are not cut at the AOI edge, then crops back.
+- **`src/ml`** turns the stack into a table of scorable cells, cross-validates over 2 km blocks, calibrates out-of-fold scores, and writes the selected model's scores back to the grid as `risk.tif` (`risk` from the final model, `risk_oof` cross-fitted).
+- **`src/agents`**: `tools.py` defines six read-only functions as plain Python callables and Anthropic tool-use JSON schemas. `agent.py` runs a Claude tool-calling loop when `ANTHROPIC_API_KEY` is set, or a deterministic template narrator when it isn't; both call the same tools.
+- **`src/api`** wraps the same tools, so the API, agent and dashboard share one code path and one `RiskModel` instance per process.
+- **`dashboard`** imports `src` directly (no network hop) for local iteration speed; `docker-compose.yml` runs the API and dashboard as separate services.
 
 ## Data flow
 
-`fetch_data.py` / `fetch_satellite.py` (one-time, hits public APIs) → `data/raw/*` → `fusion.build_features()` → `data/processed/features.csv` → `train.train_and_save()` → `data/processed/model.pkl` + `metrics.json` → served by API/agent/dashboard. `scripts/run_pipeline.py` runs the middle three steps in one command and completes in under 5 seconds on this AOI size.
+`fetch_data.py` (one-time, public endpoints) → `data/hitoyoshi/raw/*` → `fusion.build_features()` → `features.tif` → `train.train_and_save()` → `model.joblib`, `risk.tif`, `metrics.json` → `evaluate.error_report()` → `error_analysis.csv`. `scripts/run_pipeline.py` runs everything after the fetch in about 2.5 minutes.
 
 ## Design decisions and trade-offs
 
-- **Grid-based fusion instead of per-building rasters.** A regular ~650m analysis grid (480 cells) keeps the whole pipeline fast and easy to reason about, at the cost of losing sub-grid detail, acceptable for regional triage and documented as a limitation for parcel-level decisions.
-- **Proxy ML label instead of a fabricated one.** No free, reproducible historical flood-extent polygon dataset was available for this AOI. Rather than inventing performance numbers against a synthetic label, the label is a real observational signal (Sentinel-2 NDWI increase, pre vs. post flood), genuine remote sensing but a weak proxy for actual inundation given the cloud-cover limitation above. This is stated everywhere the model's output appears.
-- **Deterministic tools, LLM narration only.** The agent never computes a number; every statistic in a report traces back to a tool call, logged in `tool_log`. This is both a safety property (no hallucinated numbers) and a debuggability property (you can replay any report from its tool log).
-- **No message-passing queue or database.** For a single-AOI PoC, flat files (`features.csv`, `model.pkl`) are simpler and fully reproducible from `run_pipeline.py`; a real deployment covering many AOIs/clients would need a proper store (see Future Work in the README).
+- **Score once, serve a raster.** All 153k scorable cells are scored at training time, so a request is a coordinate transform and an array index. No sklearn model is loaded in the API, cold start is a ~6 MB raster read, and scoring a portfolio is vectorised (`RiskModel.predict_points`).
+- **A real label, and a measured comparison with the proxy.** The GSI estimate is the closest thing to ground truth that is public for this event. Keeping the old NDWI-change label as a diagnostic band lets the pipeline report how poor it was (CSI 0.13 against GSI) instead of asserting it.
+- **Spatial CV everywhere a number is reported**, including threshold tuning (inner split of training blocks) and calibration (cross-fitted), with random CV alongside to make the leakage visible.
+- **Pure-numpy hydrology.** Priority-Flood and D8 are a few dozen lines; at ~360k cells they run in seconds, so a compiled dependency (pysheds, richdem, numba) is not worth the install footprint.
+- **Deterministic tools, LLM narration only.** The agent never computes a number; every statistic in a report traces back to a logged tool call.
+- **Flat files, no database.** For a single AOI, GeoTIFF + JSON artifacts are simpler and fully reproducible; several AOIs or clients would need a tiled store and a model registry.
 
 ## Scalability considerations / failure points
 
-- `RiskModel` loads `features.csv` fully into memory per API worker; fine at 480 rows, would need chunking/tiling for a country-scale grid.
-- The deterministic NLU in `agent.py` (`parse_query`) is keyword/regex based and only knows the fixed `PLACES` dict for this AOI; it does not generalize to new regions without either adding places or wiring the real LLM path (which does generalize, since Claude parses free text itself).
-- `opentopodata` and `open-meteo` are rate-limited public APIs; `fetch_data.py` caches results to disk and is idempotent, but a multi-AOI production ingestion job would need retry/backoff and a paid tier or self-hosted SRTM tiles.
-- The API holds one `RiskModel` singleton in process memory (`src/api/main.py:rm()`); horizontal scaling would need either a shared model-serving layer or per-worker reload logic.
+- `RiskModel` holds the full feature and risk stacks in memory (~10 MB here). A national grid would need tiled/COG-backed windowed reads instead.
+- `hydrology.py` is single-threaded Python loops over a heap; it is fine at this size but would need a compiled implementation for large basins.
+- Overpass, Open-Meteo and the GSI tile server are public and rate-limited; `fetch_data.py` retries with backoff and skips files that already exist, but a production job would need a mirrored or paid source.
+- The deterministic NLU (`parse_query`) only knows the places in the AOI config; the LLM path parses free text.
+- One `RiskModel` per worker process (`src/agents/tools.py:_model`); horizontal scaling just repeats the raster load per worker.
