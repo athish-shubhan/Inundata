@@ -30,7 +30,7 @@ def test_deterministic_report_structure():
     r = deterministic_report("Assess flood risk downtown within 2km")
     assert r["mode"] == "deterministic_fallback"
     md = r["report_markdown"]
-    for section in ("# Flood Risk Assessment", "## Event Context", "## Exposed Critical Infrastructure",
+    for section in ("# Flood Risk Assessment", "## Event Context", "In valley terms", "## Exposed Critical Infrastructure",
                     "## Confidence & Limitations"):
         assert section in md
     assert [t["tool"] for t in r["tool_log"]] == ["get_region_info", "assess_region", "list_exposed_assets",

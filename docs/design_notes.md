@@ -23,6 +23,10 @@ See `docs/architecture.md`. The key idea: training writes calibrated scores for 
 - **Getting ground truth without paid data.** GSI publishes its inundation estimate only as styled map tiles. `fetch_flood_reference` computes the tile range for the AOI, treats 404s as "no water", reads each tile's alpha channel as the mask, and georeferences the mosaic in Web Mercator so it can be area-averaged onto the analysis grid like any other raster.
 - **HAND that follows water, not straight lines.** The v1 "HAND" subtracted one river elevation from every cell. v2 fills depressions, routes D8 flow on a DEM padded by 3 km, and takes each cell's height above the drainage cell its own flow path reaches. Tested on synthetic valleys with known answers.
 
+## Serving honest scores
+
+The first v2 build scored the grid with the final model. Its map agreed with the 2020 extent at pooled PR-AUC 0.92, ten points above the spatial-CV estimate, because the model had been fit on 40k of those cells and every other cell sits next to one. The served map is now the cross-fitted out-of-fold score, which matches the CV estimate and is actually calibrated, and a test fails if the served map ever scores above it again. The cost is faint seams at 2 km block edges, where neighbouring cells come from different fold models.
+
 ## Key trade-off
 
 Training on one event's extent makes the scores calibrated and checkable for that event, but says nothing yet about other storms. The alternative, a physically based or multi-event model, needs data this project does not have. The choice was to measure skill properly on what exists and state the single-event limit everywhere the score appears.
@@ -41,7 +45,7 @@ Each modality lands on the grid through the mechanism its type needs: rasters th
 
 ## Agent design
 
-A tool-calling loop over six read-only tools, capped at 8 calls, with a whitelisted dispatch table. Tool results are JSON with explicit `is_error` flags. The deterministic narrator produces the same sections from the same calls. Each location carries both the model's band and whether the cell flooded in 2020, which lets a report separate "the model thinks this is exposed" from "this actually flooded".
+A tool-calling loop over six read-only tools, capped at 8 calls, with a whitelisted dispatch table. Tool results are JSON with explicit `is_error` flags. The deterministic narrator produces the same sections from the same calls. Each location carries both the model's band and whether the cell flooded in 2020, which lets a report separate "the model thinks this is exposed" from "this actually flooded". Drivers are also given as ranks within the valley (elevation, river distance, HAND), which a risk manager can read without knowing what HAND is.
 
 ## Ingestion / handling messy client data
 

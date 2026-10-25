@@ -1,24 +1,24 @@
 {
-  "import_s": 5.1,
-  "cold_first_request_ms": 9.2,
+  "import_s": 1.04,
+  "cold_first_request_ms": 5.6,
   "GET /predict": {
-    "p50_ms": 2.3,
-    "p95_ms": 4.9,
-    "bytes": 424
+    "p50_ms": 2.1,
+    "p95_ms": 6.1,
+    "bytes": 494
   },
   "GET /assets/exposed": {
-    "p50_ms": 18.9,
-    "p95_ms": 52.6,
-    "bytes": 8915
+    "p50_ms": 3.8,
+    "p95_ms": 5.5,
+    "bytes": 8954
   },
   "GET /grid": {
-    "p50_ms": 51.7,
-    "p95_ms": 79.7,
-    "bytes": 221720
+    "p50_ms": 30.8,
+    "p95_ms": 31.6,
+    "bytes": 218535
   },
   "POST /agent/analyze": {
-    "p50_ms": 12.7,
-    "p95_ms": 24.8,
-    "bytes": 3380
+    "p50_ms": 10.0,
+    "p95_ms": 11.6,
+    "bytes": 3505
   }
 }

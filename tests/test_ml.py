@@ -3,6 +3,7 @@ import json
 import numpy as np
 import pandas as pd
 import pytest
+from sklearn.metrics import average_precision_score
 
 from src.config import DATA_PROC
 from src.ml.features import BLOCK_M, FEATURE_COLS, LABEL_COL, load_table, spatial_blocks
@@ -100,10 +101,23 @@ def test_predict_points_matches_point_lookup(rm):
     assert np.isnan(out.risk_score.iloc[2]) and out.risk_band.iloc[2] == "UNSCORED"
 
 
-def test_risk_raster_is_calibrated_probability(rm):
-    s = rm.risk[np.isfinite(rm.risk)]
-    assert s.min() >= 0 and s.max() <= 1
-    assert np.isfinite(rm.risk_oof).sum() == len(s)
+def test_risk_raster_is_calibrated_probability(rm, table):
+    s = rm.risk[table.row, table.col]
+    assert np.isfinite(s).all() and s.min() >= 0 and s.max() <= 1
+    assert abs(s.mean() - table[LABEL_COL].mean()) < 0.01  # calibrated: mean score matches the flooded share
+
+
+def test_served_scores_do_not_replay_training_labels(rm, table, metrics):
+    """The served map must be out-of-fold. Scoring with the final model gave pooled PR-AUC 0.92,
+    well above the 0.82 spatial-CV estimate, because it had seen these cells' labels."""
+    served = average_precision_score(table[LABEL_COL], rm.risk[table.row, table.col])
+    assert served <= metrics["cv"][metrics["selected_model"]]["spatial_cv"]["pr_auc_mean"] + 0.03
+
+
+def test_driver_percentiles(rm):
+    low = rm.predict_point(32.2369, 130.6948)["driver_percentiles"]  # valley floor at Watari
+    assert all(0 <= v <= 100 for v in low.values())
+    assert rm.percentile("elev_m", -1e9) == 0 and rm.percentile("elev_m", 1e9) == 100
 
 
 def test_coarse_grid(rm):

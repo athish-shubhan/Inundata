@@ -175,8 +175,7 @@ def _train_and_save(df: pd.DataFrame) -> dict:
     final = fit(make_models()[best], X, y)
     joblib.dump({"model": final, "calibrator": calibrator, "name": best, "features": FEATURE_COLS,
                  "threshold": threshold}, DATA_PROC / "model.joblib")
-    risk = calibrator.predict(final.predict_proba(X)[:, 1])
-    write_risk_raster(df, {"risk": risk, "risk_oof": calibrated}, threshold)
+    write_risk_raster(df, calibrated, threshold)
 
     report = {
         "selected_model": best,
@@ -191,36 +190,42 @@ def _train_and_save(df: pd.DataFrame) -> dict:
                  "n_features": len(FEATURE_COLS), "features": FEATURE_COLS, "block_m": BLOCK_M,
                  "n_blocks": int(len(np.unique(cv["blocks"]))), "n_folds": N_FOLDS,
                  "max_train_rows_per_fit": MAX_TRAIN_ROWS},
-        "feature_importance": feature_importance(final, X, y),
+        "feature_importance": feature_importance(make_models()[best], X, y, cv["fold_of"]),
         "caveat": CAVEAT,
     }
     (DATA_PROC / "metrics.json").write_text(json.dumps(report, indent=1, default=float) + "\n")
     return report
 
 
-def write_risk_raster(df: pd.DataFrame, scores: dict[str, np.ndarray], threshold: float):
+def write_risk_raster(df: pd.DataFrame, calibrated_oof: np.ndarray, threshold: float):
     """Scores back on the analysis grid, so serving is a raster lookup with no model in the request path.
 
-    ``risk`` is the final model (what the API serves); ``risk_oof`` is the cross-fitted out-of-fold
-    score, i.e. what the model predicted for each cell without having seen that cell's block.
+    The served score is the cross-fitted out-of-fold one: each cell is scored by the fold model that
+    never saw its block, then calibrated by an isotonic map fit on the other folds. Scoring the grid
+    with the final model instead would replay the training labels (it saw 40k of these cells and
+    their neighbours), so the map would look sharper than the model is and its "probabilities"
+    would not be calibrated. The final model in model.joblib is for scoring cells outside this grid.
     """
     grid, _, _ = read_stack(DATA_PROC / "features.tif")
-    rows, cols = df.row.to_numpy(), df.col.to_numpy()
-    layers = {}
-    for name, s in scores.items():
-        band = np.full(grid.shape, np.nan, dtype="float32")
-        band[rows, cols] = s
-        layers[name] = band
-    write_stack(DATA_PROC / "risk.tif", grid, layers, tags={"operating_threshold": threshold})
+    band = np.full(grid.shape, np.nan, dtype="float32")
+    band[df.row.to_numpy(), df.col.to_numpy()] = calibrated_oof
+    write_stack(DATA_PROC / "risk.tif", grid, {"risk": band}, tags={"operating_threshold": threshold})
 
 
-def feature_importance(model, X, y) -> dict:
+def feature_importance(model, X, y, fold_of, rows_per_fold=10_000) -> dict:
+    """Permutation importance (drop in PR-AUC) measured on held-out spatial folds, averaged over folds."""
     from sklearn.inspection import permutation_importance
     rng = np.random.default_rng(SEED)
-    idx = rng.choice(len(y), size=min(20000, len(y)), replace=False)
-    r = permutation_importance(model, X[idx], y[idx], scoring="average_precision", n_repeats=3,
-                               random_state=SEED, n_jobs=-1)
-    return dict(sorted(zip(FEATURE_COLS, r.importances_mean.round(4).tolist()), key=lambda kv: -kv[1]))
+    per_fold = []
+    for k in np.unique(fold_of):
+        tr, te = np.flatnonzero(fold_of != k), np.flatnonzero(fold_of == k)
+        te = rng.choice(te, size=min(rows_per_fold, len(te)), replace=False)
+        m = fit(model, X[tr], y[tr])
+        r = permutation_importance(m, X[te], y[te], scoring="average_precision", n_repeats=3,
+                                   random_state=SEED, n_jobs=-1)
+        per_fold.append(r.importances_mean)
+    mean = np.mean(per_fold, axis=0).round(4).tolist()
+    return dict(sorted(zip(FEATURE_COLS, mean), key=lambda kv: -kv[1]))
 
 
 if __name__ == "__main__":

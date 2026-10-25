@@ -16,7 +16,7 @@ def error_report() -> dict:
     df = load_table()
     _, risk, tags = read_stack(DATA_PROC / "risk.tif")
     thr = float(tags["operating_threshold"])
-    df["risk_oof"] = risk["risk_oof"][df.row, df.col]
+    df["risk_oof"] = risk["risk"][df.row, df.col]  # the served score is already out-of-fold
     df["pred"] = (df.risk_oof >= thr).astype(int)
     y = df[LABEL_COL].astype(int)
 

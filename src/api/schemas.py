@@ -9,6 +9,7 @@ class PredictResponse(BaseModel):
     status: str = Field(..., description="scored, open_water, cloud or no_data")
     grid_cell: dict
     drivers: dict
+    driver_percentiles: dict = Field(..., description="share of scored cells in the AOI at or below this value, 0-100")
     observed_2020: dict
 
 

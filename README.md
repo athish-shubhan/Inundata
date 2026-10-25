@@ -26,7 +26,7 @@ A regional insurer/infrastructure operator in Kumamoto Prefecture wants to know,
 fetch (public COGs/APIs) → 30 m grid fusion + DEM hydrology → spatially validated, calibrated model → risk raster → agent / API / dashboard
 ```
 
-Every input is warped onto one 30 m UTM grid (508 × 305 cells, 15.2 × 9.2 km). Terrain, D8 flow routing and Height Above Nearest Drainage are computed from the DEM; pre-event Sentinel-2 adds land cover. Four models are compared with spatial cross-validation against the Geospatial Information Authority of Japan (GSI) flood map for 2020-07-04; the winner's calibrated scores are written to `risk.tif`, so the serving layer is a raster lookup. An LLM-capable agent (with a fully functional deterministic fallback) turns a plain-English request into a structured, honest report by calling read-only tools; it never computes a number itself.
+Every input is warped onto one 30 m UTM grid (508 × 305 cells, 15.2 × 9.2 km). Terrain, D8 flow routing and Height Above Nearest Drainage are computed from the DEM; pre-event Sentinel-2 adds land cover. Four models are compared with spatial cross-validation against the Geospatial Information Authority of Japan (GSI) flood map for 2020-07-04; the winner's cross-fitted, calibrated scores are written to `risk.tif`, so the serving layer is a raster lookup and every served score comes from a model that never saw that cell's label. An LLM-capable agent (with a fully functional deterministic fallback) turns a plain-English request into a structured, honest report by calling read-only tools; it never computes a number itself.
 
 ## 4. Architecture
 
@@ -78,10 +78,11 @@ Four candidates, each scored with **spatial** cross-validation: `StratifiedGroup
 *(means ± std over 5 spatial folds; CSI is the critical success index, IoU of the flooded class. Regenerate with `python scripts/run_pipeline.py`; numbers are from this repo's last run.)*
 
 - **Selection rule:** highest mean spatial-CV PR-AUC. The random-CV column is about 0.1 higher for the tree models: that gap is the leakage a random split would have hidden.
-- **Calibration:** out-of-fold scores are isotonically calibrated with cross-fitting (each fold mapped by a calibrator fit on the others). Brier score 0.0209 raw → 0.0195 calibrated, against 0.0475 for predicting the base rate everywhere. The served `risk` is therefore a probability, and HIGH starts at the trained operating threshold (0.41).
+- **Calibration:** out-of-fold scores are isotonically calibrated with cross-fitting (each fold mapped by a calibrator fit on the others). Brier score 0.0209 raw → 0.0195 calibrated, against 0.0475 for predicting the base rate everywhere. HIGH starts at the trained operating threshold (0.41).
+- **What is served:** these cross-fitted scores, not the final model's. Scoring the grid with the final model looked better (pooled PR-AUC 0.92) only because it had seen 40k of these labels and their neighbours, and it pushed about nine times as many cells to ≥ 0.99. A test (`test_served_scores_do_not_replay_training_labels`) keeps the served map from scoring above the spatial-CV estimate. The final model in `model.joblib` is for locations outside this grid.
 - **Out-of-fold errors** (`src/ml/evaluate.py`, every cell scored by a model that never saw its block): precision 0.68, recall 0.76 at the operating threshold; false negatives and positives are written to `error_analysis.csv` and mapped in the dashboard.
 - **Was the old label any good?** No. NDWI change (post minus pre > 0.04) agrees with the GSI extent at CSI 0.13 (recall 0.44, precision 0.16), and a random forest trained on it scores PR-AUC 0.27 against GSI, versus 0.82 when trained on GSI. That measured gap is why v2 switched label.
-- **What drives it:** permutation importance is led by elevation (0.74) and distance to the main river (0.45), then HAND (0.15). HAND alone is a weak predictor here (the baseline row) because it is measured to the nearest drainage including small tributaries, while the 2020 flood was the Kuma main stem backing up across the valley floor; see the HAND-band breakdown from `python -m src.ml.evaluate`.
+- **What drives it:** permutation importance, measured on held-out spatial folds, is led by elevation (0.64) and distance to the main river (0.38); HAND, flow accumulation, TPI, slope and NDVI follow at 0.05 to 0.07. HAND alone is a weak predictor here (the baseline row) because it is measured to the nearest drainage including small tributaries, while the 2020 flood was the Kuma main stem backing up across the valley floor; see the HAND-band breakdown from `python -m src.ml.evaluate`. HAND measured only to the main river was tried and did not help (PR-AUC 0.808 vs 0.820): half the grid drains out of the AOI before reaching the mapped channel, so it is undefined there.
 
 **Caveat, stated everywhere this model's output appears:** the label is the GSI rapid estimate, itself a model-assisted map rather than a surveyed extent, and the model is trained and evaluated on one event. Scores are calibrated for this event; treat them as relative susceptibility for other storms or places.
 
@@ -93,9 +94,9 @@ Hydrologically derived features rather than raw coordinates (flow-path HAND, flo
 
 `src/agents/agent.py` implements a Claude tool-calling loop (`llm_report`) over six read-only tools defined in `src/agents/tools.py` with JSON schemas: `get_region_info`, `assess_region`, `list_exposed_assets`, `list_exposed_infrastructure`, `get_event_rainfall`, `get_model_metrics`. A fully functional **deterministic fallback** (`deterministic_report`) runs automatically when `ANTHROPIC_API_KEY` is unset; this is how the repo runs out of the box and how it was verified. Both paths call the same tools and get identical numbers; only the phrasing differs. Every tool call is logged with latency (`tool_log`), the LLM loop is capped at 8 tool calls, and the toolset is a fixed whitelist; it cannot execute shell commands or write files.
 
-Each scored location also reports whether that cell was inside the observed 2020 extent, so a report can say "HIGH risk, and flooded in 2020". Named places come from the AOI config (`downtown`, `hitoyoshi station`, `city hall`, `castle`, `nishise`, `kuma village`, ...), radii can be given in km or m.
+Each scored location also reports whether that cell was inside the observed 2020 extent, so a report can say "HIGH risk, and flooded in 2020", and ranks its elevation, river distance and HAND against the rest of the valley ("lower than 93 % of scored cells") so a non-specialist can see why it scored that way. Named places come from the AOI config (`downtown`, `hitoyoshi station`, `city hall`, `castle`, `nishise`, `kuma village`, ...), radii can be given in km or m.
 
-Example query: *"Assess the flood risk around downtown Hitoyoshi after recent rainfall and identify exposed infrastructure within 2km."* Answer (deterministic mode): HIGH (0.57); 53 client assets within 2 km (¥2.32 bn), 18 HIGH risk (¥0.70 bn); 37 critical facilities, 17 HIGH risk.
+Example query: *"Assess the flood risk around downtown Hitoyoshi after recent rainfall and identify exposed infrastructure within 2km."* Answer (deterministic mode): HIGH (0.56); 53 client assets within 2 km (¥2.32 bn), 25 HIGH risk (¥1.12 bn); 37 critical facilities, 17 HIGH risk.
 
 ## 12. Dashboard
 
@@ -118,7 +119,7 @@ Raw inputs and processed outputs are committed under `data/hitoyoshi/` so the ap
 
 ```bash
 python scripts/fetch_data.py       # DEM, Sentinel-2, weather, OSM river/infrastructure/buildings, GSI flood tiles
-python scripts/run_pipeline.py     # features.tif → CV + training → risk.tif, metrics.json → error analysis (~2.5 min)
+python scripts/run_pipeline.py     # features.tif → CV + training → risk.tif, metrics.json → error analysis (1 to 2.5 min)
 ```
 
 ## 15. Running instructions
@@ -138,7 +139,7 @@ docker compose up --build
 
 ## 16. Example workflow
 
-1. Open the dashboard's **Risk Map** tab: 29 of 120 client assets are HIGH risk (¥1.08 bn of ¥5.14 bn insured), and 23 sit inside the 2020 flood extent. Toggle the observed extent on to compare.
+1. Open the dashboard's **Risk Map** tab: 36 of 120 client assets are HIGH risk (¥1.43 bn of ¥5.14 bn insured), and 23 sit inside the 2020 flood extent. Toggle the observed extent on to compare.
 2. Click a point near downtown Hitoyoshi.
 3. Go to **AI Analyst**; the click pre-fills a query. Hit **Run analysis**.
 4. Get a markdown report: risk band and calibrated score, terrain drivers, whether the cell flooded in 2020, top exposed assets and facilities, event rainfall, model caveats, and recommended actions. It can be downloaded, and reproduced with `POST /agent/analyze`.
@@ -146,16 +147,16 @@ docker compose up --build
 ## 17. Results (this repo's own last run)
 
 - Selected model: **random_forest**, spatial-CV PR-AUC 0.82 ± 0.04 and CSI 0.52 against the GSI extent (base rate 5 %), versus 0.10 for a HAND-only baseline.
-- Hindcast on the portfolio using out-of-fold scores: 20 of the 23 assets that flooded in 2020 are flagged HIGH, with 16 further HIGH flags on assets that stayed dry.
-- Pipeline: features in 7 s (including D8 routing over ~360k cells with the 3 km margin), training and evaluation in ~140 s on an 8-core laptop.
-- **56/56 pytest tests pass**, including hydrology checks on synthetic DEMs with known answers and a no-leakage test on the feature list.
-- API latency (in-process, p50, `benchmarks/api_latency_{before,after}.json`): `/predict` 18.1 → 2.3 ms, `/assets/exposed` 125 → 19 ms, `/agent/analyze` 129 → 13 ms, first request after startup 4,822 → 9 ms (the rasters now load at startup instead of on the first request). `/grid` went from 34 to 52 ms because it returns 1,500 blocks of 300 m instead of 480 coarse cells.
+- Hindcast on the portfolio (served scores are out-of-fold): 20 of the 23 assets that flooded in 2020 are flagged HIGH, with 16 further HIGH flags on assets that stayed dry.
+- Pipeline: features in 7 s (including D8 routing over ~360k cells with the 3 km margin), training and evaluation in 70 to 140 s on an 8-core laptop, depending on load.
+- **58/58 pytest tests pass**, including hydrology checks on synthetic DEMs with known answers, a no-leakage test on the feature list, and a check that the served map does not replay training labels. CI (`.github/workflows/tests.yml`) runs pyflakes and the suite on every push; the same steps pass in a fresh venv built from `requirements.txt`.
+- API latency (in-process, p50, `benchmarks/api_latency_{before,after}.json`): `/predict` 18.1 → 2.1 ms, `/assets/exposed` 125 → 3.8 ms, `/agent/analyze` 129 → 10 ms, first request after startup 4,822 → 6 ms (the rasters now load at startup instead of on the first request). `/grid` is 34 → 31 ms while returning 1,500 blocks of 300 m instead of 480 coarse cells. Single-machine timings; expect run-to-run variation.
 
 ## 18. Verification performed
 
 - ✅ `scripts/fetch_data.py` ran against the public endpoints and produced the committed `data/hitoyoshi/raw/*`.
 - ✅ `scripts/run_pipeline.py` ran end to end and produced the committed `data/hitoyoshi/processed/*`; a rerun reproduces the same metrics.
-- ✅ `pytest`: 56/56 passing.
+- ✅ `pytest`: 58/58 passing, locally and in a clean venv installed from `requirements.txt`.
 - ✅ Dashboard executed headlessly with Streamlit's `AppTest` (all tabs render, an agent query runs) without exceptions.
 - ✅ Every API endpoint exercised through FastAPI's `TestClient` in the test suite and the latency benchmark.
 - ⚠️ **LLM tool-calling path** (`llm_report`) is implemented against the Anthropic Messages API tool-use format but was **not exercised live** (no `ANTHROPIC_API_KEY` configured). The deterministic fallback, which shares the same tools and numbers, was verified instead.
@@ -167,6 +168,7 @@ docker compose up --build
 - The label is the GSI rapid estimate, not a surveyed extent; it may miss tributary or pluvial flooding outside the mapped main-stem area.
 - The DEM is a surface model (buildings and trees included), which biases HAND upward in built-up and forested cells.
 - 30 m cells are suitable for neighbourhood triage, not parcel-level decisions.
+- Because each 2 km block is scored by a different fold model, neighbouring cells across a block edge differ slightly more than within a block (mean 0.017 vs 0.010); visible as faint seams in the risk map at most.
 - Client portfolio attributes are simulated (locations are real buildings).
 - The deterministic agent only knows the places listed in the AOI config; the LLM path handles free text.
 
@@ -174,7 +176,7 @@ docker compose up --build
 
 - Validate on a second event (e.g. other 2020 Kyushu basins) before calling the scores transferable.
 - Add Sentinel-1 SAR for an independent, cloud-penetrating flood extent at the event peak.
-- Use a bare-earth DTM (e.g. GSI 5 m/10 m DEM) for HAND, and HAND relative to the main stem as an extra feature.
+- Use a bare-earth DTM (e.g. GSI 5 m/10 m DEM) for HAND, and extend the mapped river beyond the AOI so main-stem HAND is defined everywhere.
 - Event-specific inputs (river gauge stage, radar rainfall) to turn susceptibility into an event forecast.
 - Replace flat files with a model registry and tiled raster store for multiple AOIs.
 

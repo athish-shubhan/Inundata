@@ -15,17 +15,24 @@ from src.geo.grid import read_stack
 from src.ml.features import FEATURE_COLS
 
 MODERATE_MIN = 0.1  # roughly twice the event-wide flooded share; HIGH starts at the trained operating threshold
+CONTEXT_COLS = ["elev_m", "hand_m", "river_dist_m"]  # drivers explained as a rank within the valley
 
 
 class RiskModel:
     def __init__(self, proc_dir=DATA_PROC):
         self.grid, self.layers, _ = read_stack(proc_dir / "features.tif")
         _, risk, tags = read_stack(proc_dir / "risk.tif")
-        self.risk = risk["risk"]
-        self.risk_oof = risk["risk_oof"]
+        self.risk = risk["risk"]  # cross-fitted out-of-fold calibrated probability, see train.write_risk_raster
         self.threshold = float(tags["operating_threshold"])
         self.name = json.loads((proc_dir / "metrics.json").read_text())["selected_model"]
         self.lon, self.lat = self.grid.lonlat()
+        scored = np.isfinite(self.risk)
+        self._sorted = {k: np.sort(self.layers[k][scored]) for k in CONTEXT_COLS}
+
+    def percentile(self, name: str, value: float) -> float:
+        """Share of scored cells (0-100) with a value at or below this one."""
+        ref = self._sorted[name]
+        return round(100 * np.searchsorted(ref, value, side="right") / len(ref), 1)
 
     def band(self, score) -> str:
         if score is None or np.isnan(score):
@@ -51,6 +58,7 @@ class RiskModel:
                 "grid_cell": {"row": r, "col": c, "lat": float(self.lat[r, c]), "lon": float(self.lon[r, c]),
                               "size_m": self.grid.res},
                 "drivers": {k: round(float(self.layers[k][r, c]), 3) for k in FEATURE_COLS},
+                "driver_percentiles": {k: self.percentile(k, float(self.layers[k][r, c])) for k in CONTEXT_COLS},
                 "observed_2020": {"flood_fraction": round(float(self.layers["flood_fraction"][r, c]), 3),
                                   "flooded": bool(self.layers["flooded"][r, c] == 1)}}
 

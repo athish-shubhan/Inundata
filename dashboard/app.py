@@ -163,12 +163,12 @@ with tab_model:
         plt.close(fig)
     st.subheader("Where the model is wrong (out-of-fold)")
     y = rm.layers["flooded"]
-    pred = rm.risk_oof >= rm.threshold
+    pred = rm.risk >= rm.threshold
     err = np.full(y.shape, np.nan)
-    err[np.isfinite(rm.risk_oof)] = 0
+    err[np.isfinite(rm.risk)] = 0
     err[pred & (y == 1)] = 1
-    err[pred & (y == 0) & np.isfinite(rm.risk_oof)] = 2
-    err[~pred & (y == 1) & np.isfinite(rm.risk_oof)] = 3
+    err[pred & (y == 0) & np.isfinite(rm.risk)] = 2
+    err[~pred & (y == 1) & np.isfinite(rm.risk)] = 3
     fig, ax = plt.subplots(figsize=(9, 5))
     cmap = ListedColormap(["#eeeeee", "#2ca02c", "#ff7f0e", "#d62728"])
     ax.imshow(err, cmap=cmap, vmin=-0.5, vmax=3.5, extent=extent_km, interpolation="nearest")

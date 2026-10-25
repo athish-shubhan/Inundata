@@ -9,6 +9,9 @@ from src.config import AOI, LLM_MODEL
 MAX_TOOL_CALLS = 8
 PLACES = {name: tuple(ll) for name, ll in AOI["places"].items()}
 DEFAULT_PLACE = AOI["default_place"]
+FEATURE_LABELS = {"elev_m": "elevation", "slope_deg": "slope", "hand_m": "HAND", "river_dist_m": "distance to river",
+                  "tpi_m": "topographic position", "log_flow_acc": "flow accumulation", "ndvi_pre": "vegetation (NDVI)",
+                  "ndwi_pre": "surface wetness (NDWI)", "ndbi_pre": "built-up index (NDBI)"}
 
 
 def parse_query(q: str) -> dict:
@@ -51,7 +54,7 @@ def deterministic_report(query: str) -> dict:
         return {"report_markdown": "\n".join(lines), "tool_log": log, "mode": "deterministic_fallback"}
 
     totals = max(rain["points"].values(), key=lambda v: v["event_total_mm"])
-    d = risk["drivers"]
+    d, pct = risk["drivers"], risk["driver_percentiles"]
     lines += [
         "## Summary",
         f"Flood susceptibility at {where} is {_score_text(risk)}. "
@@ -66,6 +69,9 @@ def deterministic_report(query: str) -> dict:
         f"- {risk['grid_cell']['size_m']:.0f} m grid cell centred at ({risk['grid_cell']['lat']:.4f}, {risk['grid_cell']['lon']:.4f})",
         f"- Elevation {d['elev_m']:.1f} m; height above nearest drainage (HAND) {d['hand_m']:.1f} m; "
         f"{d['river_dist_m']:.0f} m from the mapped river channel",
+        f"- In valley terms: lower than {100 - pct['elev_m']:.0f}% of scored cells, closer to the river than "
+        f"{100 - pct['river_dist_m']:.0f}%, and less HAND than {100 - pct['hand_m']:.0f}% "
+        f"(strongest model drivers: {', '.join(FEATURE_LABELS.get(f, f) for f in metrics['top_features'][:3])})",
         f"- Topographic position {d['tpi_m']:+.1f} m relative to the surrounding 300 m (negative = valley floor)",
         f"- Observed on 2020-07-04: {'inside' if risk['observed_2020']['flooded'] else 'outside'} the GSI inundation "
         f"estimate ({risk['observed_2020']['flood_fraction']:.0%} of the cell)", "",

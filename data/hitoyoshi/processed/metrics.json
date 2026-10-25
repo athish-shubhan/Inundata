@@ -116,7 +116,7 @@
      }
     ]
    },
-   "seconds": 1.8
+   "seconds": 0.3
   },
   "logistic_regression": {
    "spatial_cv": {
@@ -231,7 +231,7 @@
      }
     ]
    },
-   "seconds": 8.3
+   "seconds": 1.6
   },
   "random_forest": {
    "spatial_cv": {
@@ -346,7 +346,7 @@
      }
     ]
    },
-   "seconds": 71.5
+   "seconds": 22.1
   },
   "hist_gradient_boosting": {
    "spatial_cv": {
@@ -461,11 +461,11 @@
      }
     ]
    },
-   "seconds": 15.9
+   "seconds": 13.6
   }
  },
  "calibration": {
-  "brier_raw": 0.02094649618371588,
+  "brier_raw": 0.020946496183715878,
   "brier_calibrated": 0.019503705035947318,
   "brier_prevalence_only": 0.047531955010306964,
   "reliability": [
@@ -484,7 +484,7 @@
    {
     "bin": "0.2-0.3",
     "n": 1726,
-    "mean_predicted": 0.26219957909198205,
+    "mean_predicted": 0.2621995790919819,
     "observed_rate": 0.2473928157589803
    },
    {
@@ -508,19 +508,19 @@
    {
     "bin": "0.6-0.7",
     "n": 1103,
-    "mean_predicted": 0.6274480703743505,
+    "mean_predicted": 0.6274480703743501,
     "observed_rate": 0.5811423390752494
    },
    {
     "bin": "0.7-0.8",
     "n": 635,
-    "mean_predicted": 0.7609632902979583,
+    "mean_predicted": 0.7609632902979582,
     "observed_rate": 0.8393700787401575
    },
    {
     "bin": "0.8-0.9",
     "n": 1131,
-    "mean_predicted": 0.8440954811700284,
+    "mean_predicted": 0.8440954811700283,
     "observed_rate": 0.8222811671087533
    },
    {
@@ -566,15 +566,15 @@
   "max_train_rows_per_fit": 40000
  },
  "feature_importance": {
-  "elev_m": 0.7367,
-  "river_dist_m": 0.4506,
-  "hand_m": 0.1468,
-  "log_flow_acc": 0.0773,
-  "tpi_m": 0.0616,
-  "ndvi_pre": 0.0583,
-  "slope_deg": 0.0569,
-  "ndwi_pre": 0.0394,
-  "ndbi_pre": 0.0261
+  "elev_m": 0.64,
+  "river_dist_m": 0.3848,
+  "hand_m": 0.0725,
+  "log_flow_acc": 0.0677,
+  "tpi_m": 0.0565,
+  "slope_deg": 0.0532,
+  "ndvi_pre": 0.051,
+  "ndwi_pre": 0.0234,
+  "ndbi_pre": 0.0209
  },
  "caveat": "Label is the GSI rapid inundation estimate for 2020-07-04, itself a model-assisted map rather than a surveyed extent, and the model is trained and evaluated on this single event. Scores are calibrated on out-of-fold predictions for this event; treat them as relative susceptibility elsewhere or for other storms."
 }

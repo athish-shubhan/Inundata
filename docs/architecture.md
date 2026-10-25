@@ -56,18 +56,18 @@
 - **`config/`** holds the study area as data. `src/config.py` reads the file named by `INUNDATA_AOI` (default `config/hitoyoshi.json`) and derives every path from its `id`, so a second AOI is a second JSON file, not a code change.
 - **`src/ingestion`** holds format-agnostic loaders (CSV, GeoJSON/Shapefile, GeoTIFF) behind a small registry (`client_adapter.py`), each returning an `IngestReport` (errors/warnings/metadata) instead of failing on the first problem.
 - **`src/geo`** does all spatial work on one grid. `grid.analysis_grid()` snaps the AOI to a 30 m UTM raster; `warp()` puts any input on it with an explicit resampling choice; `write_stack`/`read_stack` keep every layer in one named-band GeoTIFF. `hydrology.py` routes flow on a DEM padded by 100 cells so catchments are not cut at the AOI edge, then crops back.
-- **`src/ml`** turns the stack into a table of scorable cells, cross-validates over 2 km blocks, calibrates out-of-fold scores, and writes the selected model's scores back to the grid as `risk.tif` (`risk` from the final model, `risk_oof` cross-fitted).
+- **`src/ml`** turns the stack into a table of scorable cells, cross-validates over 2 km blocks, calibrates out-of-fold scores, and writes the selected model's cross-fitted out-of-fold scores back to the grid as `risk.tif`. Each cell is scored by the fold model that never saw its block, so the served map is what the model would have predicted, not a replay of the training labels. The final model (`model.joblib`) is kept for scoring cells outside this grid.
 - **`src/agents`**: `tools.py` defines six read-only functions as plain Python callables and Anthropic tool-use JSON schemas. `agent.py` runs a Claude tool-calling loop when `ANTHROPIC_API_KEY` is set, or a deterministic template narrator when it isn't; both call the same tools.
 - **`src/api`** wraps the same tools, so the API, agent and dashboard share one code path and one `RiskModel` instance per process.
 - **`dashboard`** imports `src` directly (no network hop) for local iteration speed; `docker-compose.yml` runs the API and dashboard as separate services.
 
 ## Data flow
 
-`fetch_data.py` (one-time, public endpoints) → `data/hitoyoshi/raw/*` → `fusion.build_features()` → `features.tif` → `train.train_and_save()` → `model.joblib`, `risk.tif`, `metrics.json` → `evaluate.error_report()` → `error_analysis.csv`. `scripts/run_pipeline.py` runs everything after the fetch in about 2.5 minutes.
+`fetch_data.py` (one-time, public endpoints) → `data/hitoyoshi/raw/*` → `fusion.build_features()` → `features.tif` → `train.train_and_save()` → `model.joblib`, `risk.tif`, `metrics.json` → `evaluate.error_report()` → `error_analysis.csv`. `scripts/run_pipeline.py` runs everything after the fetch in 1 to 2.5 minutes.
 
 ## Design decisions and trade-offs
 
-- **Score once, serve a raster.** All 153k scorable cells are scored at training time, so a request is a coordinate transform and an array index. No sklearn model is loaded in the API, cold start is a ~6 MB raster read, and scoring a portfolio is vectorised (`RiskModel.predict_points`).
+- **Score once, serve a raster.** All 153k scorable cells are scored at training time (out-of-fold, see above), so a request is a coordinate transform and an array index. No sklearn model is loaded in the API, cold start is a ~6 MB raster read, and scoring a portfolio is vectorised (`RiskModel.predict_points`).
 - **A real label, and a measured comparison with the proxy.** The GSI estimate is the closest thing to ground truth that is public for this event. Keeping the old NDWI-change label as a diagnostic band lets the pipeline report how poor it was (CSI 0.13 against GSI) instead of asserting it.
 - **Spatial CV everywhere a number is reported**, including threshold tuning (inner split of training blocks) and calibration (cross-fitted), with random CV alongside to make the leakage visible.
 - **Pure-numpy hydrology.** Priority-Flood and D8 are a few dozen lines; at ~360k cells they run in seconds, so a compiled dependency (pysheds, richdem, numba) is not worth the install footprint.
