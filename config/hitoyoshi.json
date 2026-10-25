@@ -1,0 +1,38 @@
+{
+  "id": "hitoyoshi",
+  "name": "Hitoyoshi basin, Kumamoto, Japan",
+  "context": "Kuma River valley through Kuma village and Hitoyoshi city, flooded on 2020-07-04 during the July 2020 Kyushu heavy-rain disaster.",
+  "bbox": {"lon_min": 130.67, "lat_min": 32.18, "lon_max": 130.83, "lat_max": 32.26},
+  "metric_crs": "EPSG:32652",
+  "resolution_m": 30,
+  "event": {"start": "2020-07-01", "end": "2020-07-05"},
+  "baseline": {"start": "2020-06-01", "end": "2020-06-05"},
+  "sentinel2": {
+    "pre": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/52/S/FA/2020/5/S2A_52SFA_20200511_2_L2A",
+    "post": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/52/S/FA/2020/8/S2B_52SFA_20200814_0_L2A"
+  },
+  "dem": "https://copernicus-dem-30m.s3.amazonaws.com/Copernicus_DSM_COG_10_N32_00_E130_00_DEM/Copernicus_DSM_COG_10_N32_00_E130_00_DEM.tif",
+  "flood_reference": {
+    "tiles": "https://cyberjapandata.gsi.go.jp/xyz/20200703oame_kumagawa_0704dansaizu/{z}/{x}/{y}.png",
+    "zoom": 15,
+    "source": "GSI inundation estimate map, Kuma River, issued 2020-07-04 20:00 JST"
+  },
+  "river_name": "球磨川",
+  "weather_points": {
+    "kuma_village": [32.237, 130.695],
+    "hitoyoshi_west": [32.206, 130.737],
+    "hitoyoshi_center": [32.216, 130.754]
+  },
+  "places": {
+    "hitoyoshi station": [32.2158, 130.7535],
+    "downtown": [32.2158, 130.7535],
+    "city center": [32.2158, 130.7535],
+    "city hall": [32.2058, 130.7600],
+    "castle": [32.2111, 130.7666],
+    "nishise": [32.2062, 130.7365],
+    "watari": [32.2369, 130.6948],
+    "kuma village": [32.2369, 130.6948],
+    "upstream": [32.2369, 130.6948]
+  },
+  "default_place": "downtown"
+}

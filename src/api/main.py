@@ -1,86 +1,121 @@
-import time
 import tempfile
+import time
+from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, UploadFile, File
+
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from src.config import DATA_PROC
-from src.agents.tools import get_region_info, assess_region, list_exposed_assets, get_model_metrics
+
+from src.agents import tools
 from src.agents.agent import run_agent
+from src.api.schemas import (AgentRequest, AgentResponse, ExposedAssetsResponse, ExposedInfrastructureResponse,
+                             IngestResponse, PredictResponse)
+from src.config import CORS_ORIGINS, DATA_PROC
 from src.ingestion.client_adapter import ingest_client_dataset
-from src.ml.model import RiskModel
 from src.services.logging import get_logger
-from src.api.schemas import PredictResponse, ExposedAssetsResponse, AgentRequest, AgentResponse, IngestResponse
 
 log = get_logger("api")
-app = FastAPI(title="Inundata API", version="0.1.0",
-              description="Flood-risk PoC for the Kuma River basin: geospatial + ML + agentic analysis.")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+ARTIFACTS = [DATA_PROC / f for f in ("features.tif", "risk.tif", "metrics.json")]
 
-_rm: RiskModel | None = None
 
-def rm() -> RiskModel:
-    global _rm
-    if _rm is None:
-        if not (DATA_PROC / "model.pkl").exists():
-            raise HTTPException(503, "model not trained yet, run scripts/run_pipeline.py")
-        _rm = RiskModel()
-    return _rm
+def model_ready() -> bool:
+    return all(p.exists() for p in ARTIFACTS)
+
+
+def require_model():
+    if not model_ready():
+        raise HTTPException(503, "model not trained yet, run scripts/run_pipeline.py")
+    return tools._model()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Load the rasters at startup so the first request does not pay for it.
+    if model_ready():
+        tools._model()
+    yield
+
+
+app = FastAPI(title="Inundata API", version="0.2.0", lifespan=lifespan,
+              description="Flood-susceptibility API for the Kuma River basin: 30 m terrain/land-cover model "
+                          "validated against the observed July 2020 inundation, plus an agentic analyst.")
+app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["GET", "POST"], allow_headers=["*"])
+
 
 @app.middleware("http")
 async def timing(request, call_next):
-    t0 = time.time()
+    t0 = time.perf_counter()
     resp = await call_next(request)
-    dt = round((time.time() - t0) * 1000, 1)
+    dt = round((time.perf_counter() - t0) * 1000, 1)
     log.info(f"{request.method} {request.url.path} {resp.status_code} {dt}ms")
     resp.headers["X-Process-Time-Ms"] = str(dt)
     return resp
 
+
 @app.get("/health")
 def health():
-    return {"status": "ok", "model_ready": (DATA_PROC / "model.pkl").exists()}
+    return {"status": "ok", "model_ready": model_ready()}
+
 
 @app.get("/region")
 def region():
-    return get_region_info()
+    return tools.get_region_info()
+
 
 @app.get("/predict", response_model=PredictResponse)
 def predict(lat: float, lon: float):
-    rm()
-    return assess_region(lat, lon)
+    try:
+        return require_model().predict_point(lat, lon)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
 
 @app.get("/assets/exposed", response_model=ExposedAssetsResponse)
-def exposed(lat: float, lon: float, radius_km: float = 2.0):
-    rm()
-    return list_exposed_assets(lat, lon, radius_km)
+def exposed_assets(lat: float, lon: float, radius_km: float = Query(2.0, gt=0, le=20)):
+    require_model()
+    return tools.list_exposed_assets(lat, lon, radius_km)
+
+
+@app.get("/infrastructure/exposed", response_model=ExposedInfrastructureResponse)
+def exposed_infrastructure(lat: float, lon: float, radius_km: float = Query(2.0, gt=0, le=20)):
+    require_model()
+    return tools.list_exposed_infrastructure(lat, lon, radius_km)
+
+
+@app.get("/rainfall")
+def rainfall():
+    return tools.get_event_rainfall()
+
 
 @app.get("/model/metrics")
 def metrics():
     if not (DATA_PROC / "metrics.json").exists():
         raise HTTPException(503, "metrics not available, train the model first")
-    return get_model_metrics()
+    return tools.get_model_metrics()
+
 
 @app.get("/grid")
-def grid():
-    df = rm().predict_grid()
-    cols = ["lat", "lon", "risk_score", "elev_m", "hand_m", "river_dist_m", "rain_flood_mm"]
-    return df[cols].round(4).to_dict("records")
+def grid(step: int = Query(10, ge=1, le=50, description="block size in 30 m cells; step=10 returns 300 m blocks")):
+    df = require_model().coarse_grid(step)
+    return df.round(4).to_dict("records")
+
 
 @app.post("/agent/analyze", response_model=AgentResponse)
 def analyze(req: AgentRequest):
-    rm()
+    require_model()
     return run_agent(req.query)
+
 
 @app.post("/ingest", response_model=IngestResponse)
 async def ingest(file: UploadFile = File(...), lat_col: str = "lat", lon_col: str = "lon"):
-    suffix = Path(file.filename).suffix
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+    with tempfile.NamedTemporaryFile(suffix=Path(file.filename).suffix, delete=False) as tmp:
         tmp.write(await file.read())
-        tmp_path = tmp.name
     try:
-        result = ingest_client_dataset(tmp_path, lat_col=lat_col, lon_col=lon_col)
+        result = ingest_client_dataset(tmp.name, lat_col=lat_col, lon_col=lon_col)
     except ValueError as e:
         raise HTTPException(400, str(e))
+    finally:
+        Path(tmp.name).unlink(missing_ok=True)
     rep = result.report if hasattr(result, "report") else result[1]
     rep.source = file.filename
-    Path(tmp_path).unlink(missing_ok=True)
     return rep.to_dict()

@@ -1,134 +1,204 @@
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import json
+
+import folium
+import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
+from matplotlib.patches import Patch
 import numpy as np
 import pandas as pd
 import streamlit as st
-import folium
 from streamlit_folium import st_folium
-import matplotlib.pyplot as plt
 
-from src.config import DATA_RAW, DATA_PROC, LAT_MIN, LAT_MAX, LON_MIN, LON_MAX
-from src.agents.tools import get_region_info
 from src.agents.agent import run_agent
-from src.ml.model import RiskModel
-from src.geo.terrain import load_grid
-from src.geo.indices import ndwi
+from src.agents.tools import get_event_rainfall, get_region_info
+from src.config import DATA_PROC, DATA_RAW, LAT_MAX, LAT_MIN, LON_MAX, LON_MIN
 from src.ingestion.client_adapter import ingest_client_dataset
+from src.ml.model import RiskModel
 
 st.set_page_config(page_title="Inundata", layout="wide")
+
 
 @st.cache_resource
 def get_model():
     return RiskModel()
 
-@st.cache_data
-def get_grid_df():
-    return get_model().predict_grid()
 
 @st.cache_data
-def get_ndwi_pair():
-    lats, lons, _ = load_grid()
-    return ndwi("pre_flood_2020-05-11", lats, lons), ndwi("post_flood_2020-08-29", lats, lons), lats, lons
+def overlays():
+    rm = get_model()
+    risk, bounds = rm.grid.to_wgs84(rm.risk)
+    flooded, _ = rm.grid.to_wgs84(np.where(rm.layers["flooded"] == 1, 1.0, np.nan))
+    return risk, flooded, bounds
 
-def array_to_rgba(arr, cmap, vmin, vmax):
-    norm = plt.Normalize(vmin=vmin, vmax=vmax)
-    rgba = plt.get_cmap(cmap)(norm(np.nan_to_num(arr, nan=vmin)))
+
+@st.cache_data
+def scored_portfolio():
+    return get_model().predict_points(pd.read_csv(DATA_RAW / "client" / "client_portfolio.csv"))
+
+
+def array_to_rgba(arr, cmap, vmin, vmax, alpha=1.0):
+    rgba = plt.get_cmap(cmap)(plt.Normalize(vmin=vmin, vmax=vmax)(np.nan_to_num(arr, nan=vmin)))
+    rgba[..., 3] = alpha
     rgba[np.isnan(arr)] = [0, 0, 0, 0]
     return rgba
 
-st.title("Inundata: Kuma River Basin Flood Intelligence")
-st.caption("Simulated client engagement · Hitoyoshi, Kumamoto, Japan · July 2020 flood disaster")
 
+def raster_panel(col, arr, title, cmap, vmin, vmax, extent_km):
+    fig, ax = plt.subplots(figsize=(4.5, 3))
+    im = ax.imshow(arr, cmap=cmap, vmin=vmin, vmax=vmax, extent=extent_km, interpolation="nearest")
+    ax.set_title(title, fontsize=10)
+    ax.set_xlabel("km east", fontsize=8)
+    ax.tick_params(labelsize=7)
+    plt.colorbar(im, ax=ax, fraction=0.03)
+    col.pyplot(fig)
+    plt.close(fig)
+
+
+rm = get_model()
 region = get_region_info()
-df = get_grid_df()
-client_df = pd.read_csv(DATA_RAW / "client" / "client_portfolio.csv")
+portfolio = scored_portfolio()
 infra = json.loads((DATA_RAW / "gis" / "infrastructure.geojson").read_text())
-river = json.loads((DATA_RAW / "gis" / "kuma_river.geojson").read_text())
+river = json.loads((DATA_RAW / "gis" / "river.geojson").read_text())
 metrics = json.loads((DATA_PROC / "metrics.json").read_text())
+best = metrics["selected_model"]
+extent_km = [0, rm.grid.width * rm.grid.res / 1000, 0, rm.grid.height * rm.grid.res / 1000]
+
+st.title("Inundata: Kuma River Basin Flood Intelligence")
+st.caption(f"Simulated client engagement · {region['name']} · {region['context']}")
 
 tab_map, tab_sat, tab_model, tab_client, tab_agent = st.tabs(
-    ["Risk Map", "Satellite Change Detection", "Model Performance", "Client Data", "AI Analyst"])
+    ["Risk Map", "Satellite & Flood Reference", "Model Performance", "Client Data", "AI Analyst"])
 
 with tab_map:
     c1, c2 = st.columns([3, 1])
+    high = portfolio[portfolio.risk_band == "HIGH"]
     with c2:
-        st.metric("Assets in AOI", len(client_df))
-        st.metric("Total exposure", f"¥{client_df.value_jpy.sum():,.0f}")
-        st.metric("High-risk grid cells (score≥0.5)", int((df.risk_score >= 0.5).sum()))
+        st.metric("Client assets in AOI", len(portfolio))
+        st.metric("Total exposure", f"¥{portfolio.value_jpy.sum():,.0f}")
+        st.metric("HIGH-risk assets", f"{len(high)} (¥{high.value_jpy.sum():,.0f})")
+        st.metric("Assets inside the 2020 flood extent", int(portfolio.flooded_2020.sum()))
+        show_obs = st.checkbox("Show observed 2020 flood extent (GSI)", False)
         show_assets = st.checkbox("Show client assets", True)
         show_infra = st.checkbox("Show critical infrastructure", True)
-        show_river = st.checkbox("Show river centerline", True)
+        show_river = st.checkbox("Show river", True)
     with c1:
-        m = folium.Map(location=[(LAT_MIN + LAT_MAX) / 2, (LON_MIN + LON_MAX) / 2], zoom_start=12, tiles="OpenStreetMap")
-        rgba = array_to_rgba(df.pivot(index="lat", columns="lon", values="risk_score").sort_index(ascending=False).values, "RdYlBu_r", 0, 1)
-        folium.raster_layers.ImageOverlay(rgba, bounds=[[LAT_MIN, LON_MIN], [LAT_MAX, LON_MAX]], opacity=0.55, name="Flood risk").add_to(m)
+        risk_img, flooded_img, bounds = overlays()
+        m = folium.Map(location=[(LAT_MIN + LAT_MAX) / 2, (LON_MIN + LON_MAX) / 2], zoom_start=13, tiles="OpenStreetMap")
+        folium.raster_layers.ImageOverlay(array_to_rgba(risk_img, "RdYlBu_r", 0, 1, 0.55), bounds=bounds,
+                                          name="Flood susceptibility").add_to(m)
+        if show_obs:
+            folium.raster_layers.ImageOverlay(array_to_rgba(flooded_img, "Blues", 0, 1, 0.6), bounds=bounds,
+                                              name="Observed 2020-07-04 (GSI)").add_to(m)
         if show_river:
-            folium.GeoJson(river, name="Kuma River").add_to(m)
+            folium.GeoJson(river, name="Kuma River", style_function=lambda _: {"color": "#1f4e9c", "weight": 2}).add_to(m)
         if show_infra:
             for f in infra["features"]:
                 lo, la = f["geometry"]["coordinates"]
+                p = f["properties"]
                 folium.CircleMarker([la, lo], radius=4, color="black", fill=True, fill_opacity=0.8,
-                                     popup=f["properties"]["kind"]).add_to(m)
+                                    popup=f"{p['name']} ({p['kind']})").add_to(m)
         if show_assets:
-            for _, r in client_df.iterrows():
-                folium.CircleMarker([r.lat, r.lon], radius=3, color="blue", fill=True, fill_opacity=0.6,
-                                     popup=f"{r.asset_id} ¥{r.value_jpy:,}").add_to(m)
+            for _, r in portfolio.iterrows():
+                folium.CircleMarker([r.lat, r.lon], radius=3, color="#d62728" if r.risk_band == "HIGH" else "#1f77b4",
+                                    fill=True, fill_opacity=0.7,
+                                    popup=f"{r.asset_id} ¥{r.value_jpy:,} · {r.risk_band}").add_to(m)
         folium.LayerControl().add_to(m)
         out = st_folium(m, height=560, width=None)
-    st.caption("Red = higher modeled flood susceptibility. Click a point on the map, then ask the AI Analyst about that location.")
+    st.caption(f"Colour = calibrated probability that a 30 m cell floods in an event like 2020-07-04 "
+               f"(HIGH ≥ {rm.threshold:.2f}). Client assets in red are HIGH risk. Click the map, then ask the AI Analyst.")
     if out and out.get("last_clicked"):
         st.session_state["clicked"] = out["last_clicked"]
 
 with tab_sat:
-    st.subheader("Sentinel-2 NDWI: before vs. after the July 2020 flood")
-    st.caption("Pre-flood: 2020-05-11 (1.2% cloud) · Post-flood: 2020-08-29 (1.0% cloud). "
-               "Optical imagery cannot see through the storm clouds present during the flood peak (2020-07-04); "
-               "this compares standing-water/moisture signature before vs. seven weeks after the event, a documented limitation.")
-    w1, w2, lats, lons = get_ndwi_pair()
+    st.subheader("Training label: observed inundation vs. the satellite proxy")
+    pre, post = (Path(DATA_RAW / "satellite" / f"{s}_scene.txt").read_text().strip() for s in ("pre", "post"))
+    st.caption(f"Sentinel-2 L2A pre-event {pre} and post-event {post}. Optical imagery cannot see through the storm "
+               "clouds at the flood peak, so NDWI change only records what was still wet weeks later. The model is "
+               "instead trained on the GSI inundation estimate published on 2020-07-04.")
     c1, c2, c3 = st.columns(3)
-    for col, arr, title in [(c1, w1, "Pre-flood NDWI"), (c2, w2, "Post-flood NDWI"), (c3, w2 - w1, "Change (post − pre)")]:
-        fig, ax = plt.subplots(figsize=(4, 3.3))
-        im = ax.imshow(arr, cmap="BrBG" if "Change" not in title else "RdBu", vmin=-0.2 if "Change" in title else -0.8,
-                        vmax=0.2 if "Change" in title else 0.1, extent=[lons.min(), lons.max(), lats.min(), lats.max()])
-        ax.set_title(title, fontsize=10)
-        plt.colorbar(im, ax=ax, fraction=0.04)
-        col.pyplot(fig)
-    st.info(f"Grid cells flagged as inundation-signal proxy (NDWI increase > 0.04): {int(df.inundation_signal.sum() if 'inundation_signal' in df else 0)} of {len(df)}")
+    raster_panel(c1, rm.layers["ndwi_pre"], "Pre-event NDWI", "BrBG", -0.8, 0.2, extent_km)
+    raster_panel(c2, rm.layers["ndwi_change"], "NDWI change (post − pre)", "RdBu", -0.3, 0.3, extent_km)
+    raster_panel(c3, np.where(rm.layers["flooded"] == 1, 1.0, np.nan), "GSI flood extent, 2020-07-04", "Blues", 0, 1.2, extent_km)
+    px = metrics["proxy_label"]
+    a, b, c = st.columns(3)
+    a.metric("Proxy vs. GSI agreement (CSI)", f"{px['proxy_vs_reference']['csi']:.2f}")
+    b.metric("Proxy recall of flooded cells", f"{px['proxy_vs_reference']['recall']:.0%}")
+    c.metric("Model trained on proxy, PR-AUC vs. GSI", f"{px['rf_trained_on_proxy_scored_on_reference']['pr_auc']:.2f}",
+             f"{px['rf_trained_on_proxy_scored_on_reference']['pr_auc'] - metrics['cv'][best]['spatial_cv']['pr_auc_mean']:+.2f} vs GSI-trained")
 
 with tab_model:
-    st.subheader("Cross-validated performance (spatial GroupKFold, held-out blocks)")
-    cv = metrics["cv_metrics"]
-    st.dataframe(pd.DataFrame(cv).T)
+    st.subheader("Cross-validated performance")
+    rows = []
+    for name, r in metrics["cv"].items():
+        for scheme in ("spatial_cv", "random_cv"):
+            rows.append({"model": name, "cv": scheme.replace("_cv", ""),
+                         **{k: r[scheme][f"{k}_mean"] for k in ("pr_auc", "roc_auc", "f1", "csi", "precision", "recall")}})
+    st.dataframe(pd.DataFrame(rows).set_index(["model", "cv"]).round(3))
+    st.caption(f"Spatial CV holds out whole {metrics['data']['block_m'] // 1000} km blocks; random CV is shown only to "
+               f"illustrate how much it overstates skill on autocorrelated rasters. Base rate "
+               f"{metrics['data']['prevalence']:.1%} flooded. Selected: **{best}** (highest spatial PR-AUC).")
     st.warning(metrics["caveat"])
-    st.subheader("Feature importance")
-    imp = pd.Series(metrics["feature_importance"]).sort_values()
-    fig, ax = plt.subplots(figsize=(6, 4))
-    imp.plot.barh(ax=ax, color="#3b6ea5")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**Permutation importance (PR-AUC drop)**")
+        imp = pd.Series(metrics["feature_importance"]).sort_values()
+        fig, ax = plt.subplots(figsize=(5, 3.5))
+        imp.plot.barh(ax=ax, color="#3b6ea5")
+        st.pyplot(fig)
+        plt.close(fig)
+    with c2:
+        st.markdown("**Reliability of calibrated out-of-fold scores**")
+        rel = pd.DataFrame(metrics["calibration"]["reliability"])
+        fig, ax = plt.subplots(figsize=(5, 3.5))
+        ax.plot([0, 1], [0, 1], color="grey", lw=1, ls="--")
+        ax.plot(rel.mean_predicted, rel.observed_rate, marker="o", color="#3b6ea5")
+        ax.set_xlabel("predicted")
+        ax.set_ylabel("observed flooded share")
+        st.pyplot(fig)
+        plt.close(fig)
+    st.subheader("Where the model is wrong (out-of-fold)")
+    y = rm.layers["flooded"]
+    pred = rm.risk_oof >= rm.threshold
+    err = np.full(y.shape, np.nan)
+    err[np.isfinite(rm.risk_oof)] = 0
+    err[pred & (y == 1)] = 1
+    err[pred & (y == 0) & np.isfinite(rm.risk_oof)] = 2
+    err[~pred & (y == 1) & np.isfinite(rm.risk_oof)] = 3
+    fig, ax = plt.subplots(figsize=(9, 5))
+    cmap = ListedColormap(["#eeeeee", "#2ca02c", "#ff7f0e", "#d62728"])
+    ax.imshow(err, cmap=cmap, vmin=-0.5, vmax=3.5, extent=extent_km, interpolation="nearest")
+    ax.legend(handles=[Patch(color=c, label=l) for c, l in
+                       zip(cmap.colors, ["dry, correct", "flooded, caught", "false alarm", "missed"])], loc="lower left", fontsize=8)
+    ax.set_xlabel("km east")
     st.pyplot(fig)
-    err_path = DATA_PROC / "error_analysis.csv"
-    if err_path.exists():
-        st.subheader("Error analysis (in-sample, for spatial inspection only)")
-        st.dataframe(pd.read_csv(err_path))
+    plt.close(fig)
 
 with tab_client:
-    st.subheader("Client property portfolio (simulated)")
-    st.dataframe(client_df)
-    st.download_button("Download portfolio CSV", client_df.to_csv(index=False), "client_portfolio.csv")
+    st.subheader("Client property portfolio (simulated values on real OSM building locations)")
+    st.dataframe(portfolio.sort_values("risk_score", ascending=False), hide_index=True)
+    st.download_button("Download scored portfolio CSV", portfolio.to_csv(index=False), "client_portfolio_scored.csv")
     st.subheader("Ingest a new client dataset")
     up = st.file_uploader("Upload CSV or GeoJSON", type=["csv", "geojson", "json"])
     if up:
-        suffix = Path(up.name).suffix or ".csv"
-        tmp = DATA_PROC / f"_upload{suffix}"
+        tmp = DATA_PROC / f"_upload{Path(up.name).suffix or '.csv'}"
         tmp.write_bytes(up.read())
-        result = ingest_client_dataset(tmp)
+        try:
+            result = ingest_client_dataset(tmp)
+        finally:
+            tmp.unlink(missing_ok=True)
         rep = result.report if hasattr(result, "report") else result[1]
         st.json(rep.to_dict())
 
 with tab_agent:
     st.subheader("Natural-language flood-risk analyst")
+    rain = max(get_event_rainfall()["points"].values(), key=lambda v: v["event_total_mm"])
+    st.caption(f"Event rainfall {region['event_window']['start']} to {region['event_window']['end']}: "
+               f"{rain['event_total_mm']:.0f} mm (Open-Meteo reanalysis). Known places: {', '.join(region['known_places'])}.")
     default_q = "Assess the flood risk around downtown Hitoyoshi after recent rainfall and identify exposed infrastructure within 2km."
     if "clicked" in st.session_state:
         c = st.session_state["clicked"]

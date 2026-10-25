@@ -1,25 +1,24 @@
-import numpy as np
+"""Event rainfall for the report narrative.
+
+Rainfall is deliberately not a model feature: Open-Meteo's archive is ERA5-based
+reanalysis on a roughly 10 km grid, so across a 15 km AOI it is close to
+constant and only lets a model memorise location. It is reported as event
+context instead.
+"""
 import pandas as pd
-from src.config import DATA_RAW
 
-STATIONS = {"hitoyoshi_center": (32.795, 130.755), "kuma_upper": (32.77, 130.70), "kuma_lower": (32.83, 130.80)}
+from src.config import AOI, DATA_RAW
 
-def station_totals(label="flood_event"):
-    tot = {}
-    for name in STATIONS:
-        df = pd.read_csv(DATA_RAW / "weather" / f"{name}_{label}.csv")
-        tot[name] = df.precip_mm.sum()
-    return tot
 
-def idw_grid(lats, lons, label="flood_event", power=2):
-    tot = station_totals(label)
-    lon_g, lat_g = np.meshgrid(lons, lats)
-    out = np.zeros_like(lat_g, dtype="float32")
-    wsum = np.zeros_like(lat_g, dtype="float32")
-    for name, (sla, slo) in STATIONS.items():
-        d = np.sqrt((lat_g - sla) ** 2 + (lon_g - slo) ** 2) * 111_320
-        d = np.where(d < 1, 1, d)
-        w = 1 / d ** power
-        out += w * tot[name]
-        wsum += w
-    return (out / wsum).astype("float32")
+def event_rainfall() -> dict:
+    out = {}
+    for name in AOI["weather_points"]:
+        event = pd.read_csv(DATA_RAW / "weather" / f"{name}_event.csv")
+        base = pd.read_csv(DATA_RAW / "weather" / f"{name}_baseline.csv")
+        out[name] = {"event_total_mm": round(float(event.precip_mm.sum()), 1),
+                     "event_max_day_mm": round(float(event.precip_mm.max()), 1),
+                     "event_max_day": str(event.loc[event.precip_mm.idxmax(), "date"]),
+                     "baseline_total_mm": round(float(base.precip_mm.sum()), 1)}
+    return {"window": f"{AOI['event']['start']} to {AOI['event']['end']}",
+            "baseline_window": f"{AOI['baseline']['start']} to {AOI['baseline']['end']}",
+            "points": out}

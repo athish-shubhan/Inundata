@@ -1,56 +1,66 @@
+"""Builds data/<aoi>/processed/features.tif: every layer on one 30 m metric grid.
+
+The stack holds three kinds of band:
+  * predictors, all observable before the event (terrain, hydrology, pre-flood imagery);
+  * the reference label, from the GSI inundation estimate;
+  * diagnostics (permanent water, cloud, the old NDWI-change proxy) used for
+    masking and for measuring how good the proxy label was.
+"""
+import time
+
 import numpy as np
-import pandas as pd
-from scipy.ndimage import uniform_filter, maximum_filter, minimum_filter
-from src.config import DATA_PROC
-from src.geo.terrain import load_grid, slope_deg, to_geotiff
-from src.geo.indices import river_distance_m, height_above_drainage, ndwi, ndvi
-from src.geo.weather import idw_grid
+from rasterio.warp import Resampling
 
-NDWI_CHANGE_THRESH = 0.04
+from src.config import DATA_PROC, DATA_RAW
+from src.geo.grid import analysis_grid, warp, write_stack
+from src.geo.hydrology import hand_from_dem
+from src.geo.indices import cloud_mask, spectral_indices
+from src.geo.terrain import distance_to, load_dem, river_mask, slope_deg, topographic_position
 
-def neighborhood_features(arr, size=3):
-    mean = uniform_filter(np.nan_to_num(arr, nan=np.nanmean(arr)), size=size)
-    rng = maximum_filter(arr, size=size) - minimum_filter(arr, size=size)
-    return mean.astype("float32"), rng.astype("float32")
+ROUTING_BUFFER_CELLS = 100      # 3 km of extra DEM around the AOI so flow paths are not cut at the edge
+FLOODED_FRACTION = 0.5          # a cell is flooded if at least half its area is inside the GSI extent
+PROXY_NDWI_CHANGE = 0.04        # the original proxy label: NDWI(post) - NDWI(pre) above this
+PERMANENT_WATER_NDWI = 0.0      # open water before the event is river channel, not flood
+REFERENCE_PATH = DATA_RAW / "reference" / "gsi_inundation.tif"
 
-def build_features() -> pd.DataFrame:
-    lats, lons, elev = load_grid()
-    slope = slope_deg(lats, lons, elev)
-    river_dist = river_distance_m(lats, lons)
-    hand = height_above_drainage(elev, river_dist)
-    rain_flood = idw_grid(lats, lons, "flood_event")
-    rain_base = idw_grid(lats, lons, "baseline")
-    n1 = ndvi("pre_flood_2020-05-11", lats, lons)
-    w1 = ndwi("pre_flood_2020-05-11", lats, lons)
-    w2 = ndwi("post_flood_2020-08-29", lats, lons)
-    ndwi_diff = w2 - w1
-    elev_nbr_mean, elev_nbr_rng = neighborhood_features(elev)
-    hand_nbr_mean, _ = neighborhood_features(hand)
 
-    lon_g, lat_g = np.meshgrid(lons, lats)
-    df = pd.DataFrame({
-        "lat": lat_g.ravel(), "lon": lon_g.ravel(), "elev_m": elev.ravel(), "slope_deg": slope.ravel(),
-        "hand_m": hand.ravel(), "river_dist_m": river_dist.ravel(),
-        "rain_flood_mm": rain_flood.ravel(), "rain_baseline_mm": rain_base.ravel(),
-        "rain_anomaly_mm": (rain_flood - rain_base).ravel(),
-        "ndvi_pre": n1.ravel(), "ndwi_pre": w1.ravel(), "ndwi_post": w2.ravel(), "ndwi_diff": ndwi_diff.ravel(),
-        "elev_nbr_mean": elev_nbr_mean.ravel(), "elev_local_relief": elev_nbr_rng.ravel(),
-        "hand_nbr_mean": hand_nbr_mean.ravel(),
-    })
-    df = df.dropna(subset=["elev_m", "slope_deg", "hand_m", "ndwi_diff"]).reset_index(drop=True)
-    df["inundation_signal"] = (df.ndwi_diff > NDWI_CHANGE_THRESH).astype(int)
+def build_features() -> dict:
+    t0 = time.perf_counter()
+    grid = analysis_grid()
+    big = grid.buffered(ROUTING_BUFFER_CELLS)
+    inner = (slice(ROUTING_BUFFER_CELLS, -ROUTING_BUFFER_CELLS),) * 2
 
-    out = DATA_PROC / "terrain"
-    out.mkdir(parents=True, exist_ok=True)
-    to_geotiff(lats, lons, hand, out / "hand.tif")
-    to_geotiff(lats, lons, river_dist, out / "river_dist.tif")
-    to_geotiff(lats, lons, ndwi_diff, out / "ndwi_diff.tif")
-    to_geotiff(lats, lons, rain_flood, out / "rain_flood.tif")
-    df.to_csv(DATA_PROC / "features.csv", index=False)
-    return df
+    dem_big = load_dem(big)
+    hyd = hand_from_dem(dem_big, big.res, river_mask(big))
+    elev = dem_big[inner]
+    river = river_mask(grid)
+
+    pre = spectral_indices("pre", grid)
+    post = spectral_indices("post", grid)
+    flood_frac = warp(REFERENCE_PATH, grid, Resampling.average)
+
+    layers = {
+        "elev_m": elev,
+        "slope_deg": slope_deg(elev, grid.res),
+        "hand_m": hyd["hand"][inner],
+        "river_dist_m": distance_to(river, grid.res),
+        "tpi_m": topographic_position(elev, grid.res),
+        "log_flow_acc": np.log10(hyd["flow_acc"][inner]),
+        "ndvi_pre": pre["ndvi"],
+        "ndwi_pre": pre["ndwi"],
+        "ndbi_pre": pre["ndbi"],
+        "flood_fraction": flood_frac,
+        "flooded": (flood_frac >= FLOODED_FRACTION).astype("float32"),
+        "permanent_water": (pre["ndwi"] > PERMANENT_WATER_NDWI).astype("float32"),
+        "cloud": (cloud_mask("pre", grid) | cloud_mask("post", grid)).astype("float32"),
+        "ndwi_change": post["ndwi"] - pre["ndwi"],
+        "proxy_label": ((post["ndwi"] - pre["ndwi"]) > PROXY_NDWI_CHANGE).astype("float32"),
+    }
+    DATA_PROC.mkdir(parents=True, exist_ok=True)
+    write_stack(DATA_PROC / "features.tif", grid, layers, tags={"flooded_fraction_threshold": FLOODED_FRACTION})
+    return {"shape": grid.shape, "n_cells": grid.height * grid.width, "seconds": round(time.perf_counter() - t0, 1),
+            "flooded_cells": int(layers["flooded"].sum())}
+
 
 if __name__ == "__main__":
-    df = build_features()
-    print(df.shape)
-    print(df.inundation_signal.value_counts())
-    print(df.describe().T[["mean", "min", "max"]])
+    print(build_features())

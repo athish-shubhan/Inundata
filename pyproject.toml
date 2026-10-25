@@ -1,6 +1,6 @@
 [project]
 name = "inundata"
-version = "0.1.0"
+version = "0.2.0"
 description = "Geospatial flood-intelligence platform fusing satellite, weather, and GIS data with ML and an agentic LLM interface"
 requires-python = ">=3.12"
 license = { text = "MIT" }

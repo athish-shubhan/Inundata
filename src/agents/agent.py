@@ -1,85 +1,116 @@
+import json
 import re
 import time
-from src.agents.tools import TOOL_SPECS, DISPATCH, call_tool
-from src.agents.llm import has_llm, client, SYSTEM_PROMPT
-from src.config import LLM_MODEL
+
+from src.agents.llm import SYSTEM_PROMPT, client, has_llm
+from src.agents.tools import DISPATCH, TOOL_SPECS, call_tool
+from src.config import AOI, LLM_MODEL
 
 MAX_TOOL_CALLS = 8
+PLACES = {name: tuple(ll) for name, ll in AOI["places"].items()}
+DEFAULT_PLACE = AOI["default_place"]
 
-PLACES = {
-    "hitoyoshi": (32.795, 130.755), "city center": (32.795, 130.755), "downtown": (32.795, 130.755),
-    "upstream": (32.77, 130.70), "kuma upper": (32.77, 130.70),
-    "downstream": (32.83, 130.80), "kuma lower": (32.83, 130.80),
-}
 
 def parse_query(q: str) -> dict:
     ql = q.lower()
+    place = None
     m = re.search(r"(-?\d{1,2}\.\d+)\s*[,/]\s*(-?\d{2,3}\.\d+)", q)
     if m:
         lat, lon = float(m.group(1)), float(m.group(2))
     else:
-        lat, lon = None, None
-        for name, (la, lo) in PLACES.items():
-            if name in ql:
-                lat, lon = la, lo
-                break
-        if lat is None:
-            lat, lon = PLACES["city center"]
-    r = re.search(r"(\d+(?:\.\d+)?)\s*km", ql)
-    radius = float(r.group(1)) if r else 2.0
-    return {"lat": lat, "lon": lon, "radius_km": radius}
+        place = next((p for p in sorted(PLACES, key=len, reverse=True) if p in ql), DEFAULT_PLACE)
+        lat, lon = PLACES[place]
+    r = re.search(r"(\d+(?:\.\d+)?)\s*(km|kilomet(?:er|re)s?|m|met(?:er|re)s?)\b", ql)
+    radius = 2.0 if not r else float(r.group(1)) / (1 if r.group(2).startswith("k") else 1000)
+    return {"lat": lat, "lon": lon, "radius_km": radius, "place": place}
+
+
+def _score_text(risk: dict) -> str:
+    if risk.get("risk_score") is None:
+        reason = {"open_water": "open water before the event (river channel)", "cloud": "cloud-covered in the pre-event image"}
+        return f"**not scored** ({reason.get(risk.get('status'), 'no data')})"
+    return f"**{risk['risk_band']}** (calibrated score {risk['risk_score']:.2f})"
+
 
 def deterministic_report(query: str) -> dict:
     log = []
     region = call_tool("get_region_info", {}, log)
-    parsed = parse_query(query)
-    risk = call_tool("assess_region", {"lat": parsed["lat"], "lon": parsed["lon"]}, log)
-    assets = call_tool("list_exposed_assets", {"lat": parsed["lat"], "lon": parsed["lon"], "radius_km": parsed["radius_km"]}, log)
+    p = parse_query(query)
+    at = {"lat": p["lat"], "lon": p["lon"]}
+    near = at | {"radius_km": p["radius_km"]}
+    risk = call_tool("assess_region", at, log)
+    assets = call_tool("list_exposed_assets", near, log)
+    infra = call_tool("list_exposed_infrastructure", near, log)
+    rain = call_tool("get_event_rainfall", {}, log)
     metrics = call_tool("get_model_metrics", {}, log)
 
-    band = "HIGH" if risk["risk_score"] >= 0.5 else ("MODERATE" if risk["risk_score"] >= 0.2 else "LOW")
-    top_assets = assets["assets"][:5]
-    lines = [
-        f"# Flood Risk Assessment: {region['name']}", "",
-        f"**Query:** {query}", "",
+    where = f"{p['place']} ({p['lat']:.4f}, {p['lon']:.4f})" if p["place"] else f"({p['lat']:.4f}, {p['lon']:.4f})"
+    lines = [f"# Flood Risk Assessment: {region['name']}", "", f"**Query:** {query}", ""]
+    if "error" in risk:
+        lines += ["## Summary", f"No assessment possible at {where}: {risk['error']}."]
+        return {"report_markdown": "\n".join(lines), "tool_log": log, "mode": "deterministic_fallback"}
+
+    totals = max(rain["points"].values(), key=lambda v: v["event_total_mm"])
+    d = risk["drivers"]
+    lines += [
         "## Summary",
-        f"Estimated flood-susceptibility risk at ({parsed['lat']:.3f}, {parsed['lon']:.3f}) is **{band}** "
-        f"(model score {risk['risk_score']:.2f}). {assets['n_assets']} client assets fall within {parsed['radius_km']} km, "
-        f"with a combined exposure of ¥{assets['total_value_jpy']:,}.", "",
+        f"Flood susceptibility at {where} is {_score_text(risk)}. "
+        f"Within {p['radius_km']:g} km: {assets['n_assets']} client assets (¥{assets['total_value_jpy']:,}), "
+        f"{assets['n_high_risk']} HIGH risk (¥{assets['high_risk_value_jpy']:,}); "
+        f"{infra['n_sites']} critical-infrastructure sites, {infra['n_high_risk']} HIGH risk.", "",
+        "## Event Context",
+        f"- Rainfall {rain['window']}: up to {totals['event_total_mm']:.0f} mm, peaking at {totals['event_max_day_mm']:.0f} mm "
+        f"on {totals['event_max_day']}, against {totals['baseline_total_mm']:.0f} mm over {rain['baseline_window']} "
+        "(Open-Meteo reanalysis, about 10 km resolution).", "",
         "## Risk Assessment",
-        f"- Nearest evaluated grid cell: {risk['nearest_grid_cell']}",
-        f"- Elevation: {risk['drivers']['elev_m']:.1f} m, height above nearest drainage: {risk['drivers']['hand_m']:.1f} m",
-        f"- Distance to Kuma River: {risk['drivers']['river_dist_m']:.0f} m",
-        f"- Rainfall during event window: {risk['drivers']['rain_flood_mm']:.0f} mm (anomaly vs baseline: +{risk['drivers']['rain_anomaly_mm']:.0f} mm)",
-        "", "## Exposed Assets (top 5 by risk)",
+        f"- {risk['grid_cell']['size_m']:.0f} m grid cell centred at ({risk['grid_cell']['lat']:.4f}, {risk['grid_cell']['lon']:.4f})",
+        f"- Elevation {d['elev_m']:.1f} m; height above nearest drainage (HAND) {d['hand_m']:.1f} m; "
+        f"{d['river_dist_m']:.0f} m from the mapped river channel",
+        f"- Topographic position {d['tpi_m']:+.1f} m relative to the surrounding 300 m (negative = valley floor)",
+        f"- Observed on 2020-07-04: {'inside' if risk['observed_2020']['flooded'] else 'outside'} the GSI inundation "
+        f"estimate ({risk['observed_2020']['flood_fraction']:.0%} of the cell)", "",
+        "## Exposed Assets (top 5 by risk)",
     ]
-    if top_assets:
-        for a in top_assets:
-            lines.append(f"- {a['asset_id']} ({a['building_type']}, ¥{a['value_jpy']:,}), {a['dist_km']} km away, risk {a['risk_score']}")
-    else:
+    for a in assets["assets"][:5]:
+        score = "" if a["risk_score"] is None else f" ({a['risk_score']:.2f})"
+        lines.append(f"- {a['asset_id']} ({a['building_type']}, ¥{a['value_jpy']:,}, {a['occupants']} occupants), "
+                     f"{a['dist_km']} km away: {a['risk_band']}{score}"
+                     f"{', flooded in 2020' if a['flooded_2020'] else ''}")
+    if not assets["assets"]:
         lines.append("- No client assets registered within the search radius.")
+    lines += ["", "## Exposed Critical Infrastructure (top 5 by risk)"]
+    for s in infra["sites"][:5]:
+        name = f"unnamed {s['kind']}" if s["name"] == s["kind"] else f"{s['name']} ({s['kind']})"
+        lines.append(f"- {name}, {s['dist_km']} km away: {s['risk_band']}"
+                     f"{', flooded in 2020' if s['flooded_2020'] else ''}")
+    if not infra["sites"]:
+        lines.append("- No mapped critical infrastructure within the search radius.")
+    sp, rnd = metrics["spatial_cv"], metrics["random_cv"]
     lines += [
         "", "## Confidence & Limitations",
-        f"- Model: {metrics['selected_model']}, cross-validated F1={metrics['cv_metrics'][metrics['selected_model']]['f1']:.2f}, "
-        f"ROC-AUC={metrics['cv_metrics'][metrics['selected_model']]['roc_auc']}.",
+        f"- Model: {metrics['selected_model']}, spatial cross-validation PR-AUC {sp['pr_auc']:.2f} and CSI {sp['csi']:.2f} "
+        f"on held-out 2 km blocks (base rate {metrics['prevalence']:.0%}). A random split would report PR-AUC "
+        f"{rnd['pr_auc']:.2f}, which overstates skill on neighbouring cells.",
         f"- {metrics['caveat']}",
         "- Generated by the deterministic fallback narrator (no LLM API key configured); numbers are identical to the LLM path, only phrasing differs.",
         "", "## Recommended Actions",
-        "- Field-verify highest-risk assets before acting on this PoC output.",
-        "- Prioritize inspection of exposed low-elevation/near-river assets flagged above.",
+        "- Field-verify HIGH-risk assets and sites before acting on this output.",
+        "- Prioritise occupied buildings and critical infrastructure that are both HIGH risk and were flooded in 2020.",
     ]
     return {"report_markdown": "\n".join(lines), "tool_log": log, "mode": "deterministic_fallback"}
+
 
 def llm_report(query: str) -> dict:
     log = []
     c = client()
     messages = [{"role": "user", "content": query}]
     for _ in range(MAX_TOOL_CALLS):
-        resp = c.messages.create(model=LLM_MODEL, max_tokens=1500, system=SYSTEM_PROMPT, tools=TOOL_SPECS, messages=messages)
+        resp = c.messages.create(model=LLM_MODEL, max_tokens=4000, system=SYSTEM_PROMPT, tools=TOOL_SPECS, messages=messages)
         messages.append({"role": "assistant", "content": resp.content})
         if resp.stop_reason != "tool_use":
             text = "".join(b.text for b in resp.content if b.type == "text")
-            return {"report_markdown": text, "tool_log": log, "mode": "llm_agent"}
+            mode = "llm_agent" if resp.stop_reason == "end_turn" else f"llm_agent_{resp.stop_reason}"
+            return {"report_markdown": text, "tool_log": log, "mode": mode}
         tool_results = []
         for block in resp.content:
             if block.type != "tool_use":
@@ -88,13 +119,15 @@ def llm_report(query: str) -> dict:
                 out = {"error": "tool not permitted"}
             else:
                 out = call_tool(block.name, block.input, log)
-            tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(out)})
+            tool_results.append({"type": "tool_result", "tool_use_id": block.id, "is_error": "error" in out,
+                                 "content": json.dumps(out, ensure_ascii=False, default=float)})
         messages.append({"role": "user", "content": tool_results})
     return {"report_markdown": "agent exceeded tool-call budget without finishing.", "tool_log": log, "mode": "llm_agent_truncated"}
 
+
 def run_agent(query: str) -> dict:
-    t0 = time.time()
+    t0 = time.perf_counter()
     result = llm_report(query) if has_llm() else deterministic_report(query)
-    result["latency_ms"] = round((time.time() - t0) * 1000, 1)
+    result["latency_ms"] = round((time.perf_counter() - t0) * 1000, 1)
     result["query"] = query
     return result

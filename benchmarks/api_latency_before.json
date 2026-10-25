@@ -1,0 +1,24 @@
+{
+  "import_s": 5.26,
+  "cold_first_request_ms": 4822.1,
+  "GET /predict": {
+    "p50_ms": 18.1,
+    "p95_ms": 25.3,
+    "bytes": 361
+  },
+  "GET /assets/exposed": {
+    "p50_ms": 125.1,
+    "p95_ms": 216.5,
+    "bytes": 1217
+  },
+  "GET /grid": {
+    "p50_ms": 33.7,
+    "p95_ms": 39.1,
+    "bytes": 59097
+  },
+  "POST /agent/analyze": {
+    "p50_ms": 129.3,
+    "p95_ms": 153.9,
+    "bytes": 2029
+  }
+}

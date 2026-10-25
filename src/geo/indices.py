@@ -1,45 +1,29 @@
 import numpy as np
-import geopandas as gpd
-import rasterio
-from rasterio.warp import reproject, Resampling
-from rasterio.transform import from_origin
-from src.config import DATA_RAW, GRID_STEP, CRS, METRIC_CRS
+from rasterio.warp import Resampling
 
-def river_distance_m(lats, lons):
-    river = gpd.read_file(DATA_RAW / "gis" / "kuma_river.geojson").to_crs(METRIC_CRS)
-    line = river.geometry.iloc[0]
-    lon_g, lat_g = np.meshgrid(lons, lats)
-    pts = gpd.GeoSeries(gpd.points_from_xy(lon_g.ravel(), lat_g.ravel()), crs=CRS).to_crs(METRIC_CRS)
-    dist = pts.distance(line).values.reshape(lat_g.shape)
-    return dist.astype("float32")
+from src.config import DATA_RAW
+from src.geo.grid import Grid, warp
 
-def height_above_drainage(elev, river_dist):
-    near = river_dist <= np.nanpercentile(river_dist, 8)
-    drainage_elev = np.nanmin(elev[near]) if near.any() else np.nanmin(elev)
-    return (elev - drainage_elev).astype("float32")
+CLOUD_SCL = [3, 8, 9, 10]  # cloud shadow, medium/high cloud, thin cirrus
 
-def _read_resampled(path, lats, lons):
-    dst_tf = from_origin(lons[0] - GRID_STEP / 2, lats[0] + GRID_STEP / 2, GRID_STEP, GRID_STEP)
-    dst = np.full((len(lats), len(lons)), np.nan, dtype="float32")
-    with rasterio.open(path) as src:
-        reproject(source=rasterio.band(src, 1), destination=dst, src_transform=src.transform, src_crs=src.crs,
-                   dst_transform=dst_tf, dst_crs=CRS, resampling=Resampling.bilinear)
-    return dst
 
-def band_index(scene_label, band, lats, lons):
-    p = DATA_RAW / "satellite" / f"{scene_label}_{band}.tif"
-    return _read_resampled(p, lats, lons)
+def band(scene: str, name: str, grid: Grid) -> np.ndarray:
+    # Average resampling: a 30 m cell should hold the mean of its nine 10 m pixels, not one interpolated sample.
+    return warp(DATA_RAW / "satellite" / f"{scene}_{name}.tif", grid, Resampling.average)
 
-def ndwi(scene_label, lats, lons):
-    g = band_index(scene_label, "B03", lats, lons)
-    n = band_index(scene_label, "B08", lats, lons)
-    return (g - n) / (g + n + 1e-6)
 
-def ndvi(scene_label, lats, lons):
-    n = band_index(scene_label, "B08", lats, lons)
-    r = band_index(scene_label, "B04", lats, lons)
-    return (n - r) / (n + r + 1e-6)
+def normalized_difference(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return ((a - b) / (a + b)).astype("float32")
 
-def cloud_mask(scene_label, lats, lons):
-    scl = band_index(scene_label, "SCL", lats, lons)
-    return np.isin(np.round(scl), [3, 8, 9, 10])
+
+def spectral_indices(scene: str, grid: Grid) -> dict[str, np.ndarray]:
+    green, red, nir, swir = (band(scene, b, grid) for b in ("B03", "B04", "B08", "B11"))
+    return {"ndwi": normalized_difference(green, nir),   # open water (McFeeters 1996)
+            "ndvi": normalized_difference(nir, red),     # vegetation
+            "ndbi": normalized_difference(swir, nir)}    # built-up surfaces
+
+
+def cloud_mask(scene: str, grid: Grid) -> np.ndarray:
+    scl = warp(DATA_RAW / "satellite" / f"{scene}_SCL.tif", grid, Resampling.nearest)
+    return np.isin(scl, CLOUD_SCL)
