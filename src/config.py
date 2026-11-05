@@ -24,5 +24,5 @@ DATA_RAW = ROOT / "data" / AOI_ID / "raw"
 DATA_PROC = ROOT / "data" / AOI_ID / "processed"
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-LLM_MODEL = os.getenv("LLM_MODEL", "claude-sonnet-5")
+LLM_MODEL = os.getenv("LLM_MODEL", "claude-sonnet-5-5")
 CORS_ORIGINS = [o for o in os.getenv("CORS_ORIGINS", "http://localhost:8501").split(",") if o]
