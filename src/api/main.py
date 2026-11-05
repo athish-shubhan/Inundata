@@ -137,4 +137,7 @@ async def ingest(file: UploadFile = File(...), lat_col: str = "lat", lon_col: st
         path.unlink(missing_ok=True)
     rep = result.report
     rep.source = file.filename or "upload"
+    # Loader messages quote the file they read, which here is the server's temp file; show the upload's name.
+    rep.errors = [m.replace(str(path), rep.source) for m in rep.errors]
+    rep.warnings = [m.replace(str(path), rep.source) for m in rep.warnings]
     return rep.to_dict()

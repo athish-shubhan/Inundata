@@ -1,3 +1,5 @@
+import tempfile
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -144,3 +146,11 @@ def test_ingest_rejects_unsupported_format_before_reading(monkeypatch, tmp_path)
     assert r.status_code == 400 and "unsupported format '.docx'" in r.json()["detail"]
     assert client.post("/ingest", files={"file": ("noext", b"x", "text/plain")}).status_code == 400
     assert list(tmp_path.iterdir()) == []
+
+
+def test_ingest_errors_name_the_upload_not_the_server_temp_file():
+    r = client.post("/ingest", files={"file": ("sites.geojson", b"not json", "application/json")})
+    assert r.status_code == 200 and r.json()["ok"] is False
+    message = r.json()["errors"][0]
+    assert "sites.geojson" in message
+    assert tempfile.gettempdir() not in message
