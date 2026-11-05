@@ -6,13 +6,14 @@ from typing import Annotated
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.concurrency import run_in_threadpool
 
 from src.agents import tools
 from src.agents.agent import run_agent
 from src.api.schemas import (AgentRequest, AgentResponse, ExposedAssetsResponse, ExposedInfrastructureResponse,
                              IngestResponse, PredictResponse)
 from src.config import CORS_ORIGINS, DATA_PROC
-from src.ingestion.client_adapter import ingest_client_dataset
+from src.ingestion.client_adapter import LOADERS, ingest_client_dataset
 from src.services.logging import get_logger
 
 log = get_logger("api")
@@ -20,6 +21,8 @@ Lat = Annotated[float, Query(ge=-90, le=90, allow_inf_nan=False, description="WG
 Lon = Annotated[float, Query(ge=-180, le=180, allow_inf_nan=False, description="WGS84 longitude")]
 Radius = Annotated[float, Query(gt=0, le=tools.MAX_RADIUS_KM, description="search radius in km")]
 ARTIFACTS = [DATA_PROC / f for f in ("features.tif", "risk.tif", "metrics.json")]
+MAX_UPLOAD_BYTES = 50 * 2**20  # client registers are kilobytes to a few MB; this bounds disk use per request
+UPLOAD_CHUNK_BYTES = 2**20
 
 
 def model_ready() -> bool:
@@ -112,15 +115,26 @@ def analyze(req: AgentRequest):
 
 @app.post("/ingest", response_model=IngestResponse)
 async def ingest(file: UploadFile = File(...), lat_col: str = "lat", lon_col: str = "lon"):
-    # The loaders pick a parser from the extension, so keep the uploaded file's suffix.
-    with tempfile.NamedTemporaryFile(suffix=Path(file.filename or "").suffix, delete=False) as tmp:
-        tmp.write(await file.read())
+    # The loaders pick a parser from the extension, so check it before reading the body and keep it on disk.
+    suffix = Path(file.filename or "").suffix
+    if suffix.lstrip(".").lower() not in LOADERS:
+        raise HTTPException(400, f"unsupported format '{suffix or '(none)'}'. supported: {sorted(LOADERS)}")
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        path = Path(tmp.name)
     try:
-        result = ingest_client_dataset(tmp.name, lat_col=lat_col, lon_col=lon_col)
+        size = 0
+        with path.open("wb") as out:
+            while chunk := await file.read(UPLOAD_CHUNK_BYTES):
+                size += len(chunk)
+                if size > MAX_UPLOAD_BYTES:
+                    raise HTTPException(413, f"upload larger than {MAX_UPLOAD_BYTES // 2**20} MB")
+                out.write(chunk)
+        # geopandas/rasterio parsing is blocking; keep it off the event loop.
+        result = await run_in_threadpool(ingest_client_dataset, path, lat_col=lat_col, lon_col=lon_col)
     except ValueError as e:
         raise HTTPException(400, str(e))
     finally:
-        Path(tmp.name).unlink(missing_ok=True)
+        path.unlink(missing_ok=True)
     rep = result.report
     rep.source = file.filename or "upload"
     return rep.to_dict()

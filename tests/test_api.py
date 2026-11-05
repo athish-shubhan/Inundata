@@ -122,3 +122,25 @@ def test_exposure_rejects_invalid_coordinates_and_radius(path):
     assert client.get(path, params={"lat": 95, "lon": 130.75}).status_code == 422
     assert client.get(path, params=DOWNTOWN | {"radius_km": 21}).status_code == 422
     assert client.get(path, params=DOWNTOWN | {"radius_km": 20}).status_code == 200
+
+
+def test_ingest_rejects_oversized_upload(monkeypatch, tmp_path):
+    import src.api.main as api_main
+    monkeypatch.setattr(api_main, "MAX_UPLOAD_BYTES", 1000)
+    monkeypatch.setattr(api_main, "UPLOAD_CHUNK_BYTES", 256)
+    monkeypatch.setattr(api_main.tempfile, "tempdir", str(tmp_path))
+    body = b"id,lat,lon\n" + b"1,32.2,130.7\n" * 200  # 2.6 KB
+    r = client.post("/ingest", files={"file": ("big.csv", body, "text/csv")})
+    assert r.status_code == 413 and "larger than" in r.json()["detail"]
+    assert list(tmp_path.iterdir()) == []  # the partial temp file is removed
+    small = client.post("/ingest", files={"file": ("small.csv", body[:500], "text/csv")})
+    assert small.status_code == 200 and small.json()["ok"] is True
+
+
+def test_ingest_rejects_unsupported_format_before_reading(monkeypatch, tmp_path):
+    import src.api.main as api_main
+    monkeypatch.setattr(api_main.tempfile, "tempdir", str(tmp_path))
+    r = client.post("/ingest", files={"file": ("notes.docx", b"x" * 10, "application/octet-stream")})
+    assert r.status_code == 400 and "unsupported format '.docx'" in r.json()["detail"]
+    assert client.post("/ingest", files={"file": ("noext", b"x", "text/plain")}).status_code == 400
+    assert list(tmp_path.iterdir()) == []

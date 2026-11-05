@@ -144,3 +144,47 @@ machine and are left unchanged. The README's test count is now 86/86, re-measure
 
 `src/geo/grid.py`, `src/agents/tools.py`, `src/agents/agent.py`, `src/api/main.py`, `README.md`,
 `tests/test_api.py`, `tests/test_agent.py`, `tests/test_geo.py`, `IMPROVEMENTS.md`
+
+## Round 3 (2026-11-05): bounded, non-blocking `/ingest`
+
+Stacked on round 2 (`improve/round-2`).
+
+### What changed
+
+1. **Upload size limit.** `/ingest` did `tmp.write(await file.read())`, which reads the whole upload into memory
+   with no limit. It now streams to the temp file in 1 MB chunks and stops with a **413** past 50 MB
+   (`MAX_UPLOAD_BYTES`). The partial temp file is deleted.
+2. **Unsupported formats are rejected before the body is read.** Before, a `.docx` upload was written to disk
+   in full before the loader lookup failed. The response was already 400, but now it comes from the filename
+   alone, and the message lists the supported extensions.
+3. **Parsing runs off the event loop.** `ingest` is an `async def`, but geopandas and rasterio parsing is
+   blocking, so a large upload stalled every other request the server was handling. Parsing now goes through
+   `run_in_threadpool`.
+
+### Why it matters
+
+`/ingest` is the only endpoint that takes arbitrary client data. Without a size bound, one request can exhaust
+memory or disk. Blocking the event loop turns one slow upload into latency for every caller of `/predict`.
+
+### How it was verified
+
+```
+$ python -m pyflakes src scripts dashboard tests        # clean
+$ python -m pytest -q -p no:warnings                    # round 2 -> round 3
+86 passed  ->  88 passed in 3.08s
+```
+
+The 2 new tests (`tests/test_api.py`) were also run on round 2's code. `test_ingest_rejects_oversized_upload`
+fails there: a 2.6 KB upload against a 1000-byte limit, patched for the test, is accepted. The test also checks
+that no temp file is left behind. `test_ingest_rejects_unsupported_format_before_reading` passes on both
+branches, because the status was already 400 and only the point where the request stops changed.
+
+### Not verified
+
+- The event-loop change was not measured. I did not build a concurrent-request benchmark. It is the standard
+  FastAPI pattern for blocking work inside `async def`, and the existing tests pass through it.
+- 50 MB is a judgement call (the committed client register is 120 rows), not a measured requirement.
+
+### Files touched
+
+`src/api/main.py`, `tests/test_api.py`, `README.md`, `IMPROVEMENTS.md`
