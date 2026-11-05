@@ -1,10 +1,17 @@
-import pandas as pd
 import geopandas as gpd
+import pandas as pd
 from shapely.geometry import Point
+
 from .base import IngestReport, IngestResult
-from .validate import check_missing, check_duplicates, check_geometry, check_crs
+from .validate import check_coordinates, check_crs, check_duplicates, check_geometry, check_missing
+
 
 def load_csv(path, lat_col="lat", lon_col="lon", id_col=None, required: list[str] | None = None) -> IngestResult:
+    """Load a point CSV in WGS84.
+
+    Rows with missing or non-numeric coordinates are dropped with a warning; coordinates
+    outside lat [-90, 90] / lon [-180, 180] are an error (usually swapped or projected columns).
+    """
     rep = IngestReport(source=str(path))
     try:
         df = pd.read_csv(path)
@@ -19,7 +26,10 @@ def load_csv(path, lat_col="lat", lon_col="lon", id_col=None, required: list[str
     if rep.errors:
         return IngestResult(None, rep)
 
-    df = df.dropna(subset=[lat_col, lon_col])
+    df = check_coordinates(df, lat_col, lon_col, rep)
+    if rep.errors:
+        return IngestResult(None, rep)
+
     geom = [Point(xy) for xy in zip(df[lon_col], df[lat_col])]
     gdf = gpd.GeoDataFrame(df, geometry=geom, crs="EPSG:4326")
     check_geometry(gdf, rep)

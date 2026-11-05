@@ -1,4 +1,9 @@
+import anthropic
+
 from src.config import ANTHROPIC_API_KEY
+
+LLM_TIMEOUT_S = 60.0
+LLM_ERRORS = (anthropic.APIError,)  # includes connection errors, timeouts and HTTP status errors
 
 SYSTEM_PROMPT = """You are Inundata's flood-risk analyst agent for the Kuma River basin around Hitoyoshi, Japan.
 You never compute numbers yourself. For any risk score, statistic, asset or site list, call a tool.
@@ -16,5 +21,5 @@ def has_llm() -> bool:
 
 
 def client():
-    import anthropic
-    return anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    # Bounded so a stalled API call cannot hang /agent/analyze (the SDK default is 10 minutes).
+    return anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=LLM_TIMEOUT_S, max_retries=2)

@@ -108,7 +108,8 @@ def analyze(req: AgentRequest):
 
 @app.post("/ingest", response_model=IngestResponse)
 async def ingest(file: UploadFile = File(...), lat_col: str = "lat", lon_col: str = "lon"):
-    with tempfile.NamedTemporaryFile(suffix=Path(file.filename).suffix, delete=False) as tmp:
+    # The loaders pick a parser from the extension, so keep the uploaded file's suffix.
+    with tempfile.NamedTemporaryFile(suffix=Path(file.filename or "").suffix, delete=False) as tmp:
         tmp.write(await file.read())
     try:
         result = ingest_client_dataset(tmp.name, lat_col=lat_col, lon_col=lon_col)
@@ -116,6 +117,6 @@ async def ingest(file: UploadFile = File(...), lat_col: str = "lat", lon_col: st
         raise HTTPException(400, str(e))
     finally:
         Path(tmp.name).unlink(missing_ok=True)
-    rep = result.report if hasattr(result, "report") else result[1]
-    rep.source = file.filename
+    rep = result.report
+    rep.source = file.filename or "upload"
     return rep.to_dict()
