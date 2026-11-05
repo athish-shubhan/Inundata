@@ -188,3 +188,52 @@ branches, because the status was already 400 and only the point where the reques
 ### Files touched
 
 `src/api/main.py`, `tests/test_api.py`, `README.md`, `IMPROVEMENTS.md`
+
+## Round 4 (2026-11-05): review of rounds 1–3, and the one fix it found
+
+Rounds 1–3 (https://github.com/athish-shubhan/Inundata/pull/1, https://github.com/athish-shubhan/Inundata/pull/2,
+https://github.com/athish-shubhan/Inundata/pull/3) are merged. This round is a second pass over their merged
+diff, and its PR is a fresh branch from `main`.
+
+### What changed
+
+1. **`/ingest` reports no longer expose the server's temp path.** The loaders quote the file they read, and in
+   the API that file is the temp copy. A bad upload came back as
+   `failed to read geojson: '/tmp/tmpkrjyditw.geojson' not recognized…`, an internal path the client never sent
+   that tells them nothing. Errors and warnings now name the uploaded file (`'sites.geojson'`). The leak was
+   older than round 1, but rounds 1 and 3 both reworked this endpoint without catching it.
+
+### What else the review checked (no change needed)
+
+- **Tool-call budget loop:** it terminates on every path, counts unknown tools against the budget, and gives
+  every `tool_use` a `tool_result`.
+- **`radius_km` on the API:** NaN, `inf` and `-inf` all return 422, because the `gt`/`le` bounds reject them.
+  Only lat/lon needed `allow_inf_nan=False`.
+- **Upload limit:** the temp file is removed on 413, 400 and success alike.
+- **The 36 s test run seen after pulling `main`:** a one-off cold start. Repeat runs take 3.03 s and 2.79 s,
+  and the slowest test is 0.39 s.
+- **`/grid?step=1`:** returns 21 MB of JSON in about 2 s (all 153k cells). That is heavy, but the endpoint
+  allows it by design, so it is left alone.
+
+### How it was verified
+
+```
+$ python -m pyflakes src scripts dashboard tests        # clean
+$ python -m pytest -q -p no:warnings
+89 passed in 3.20s                                      # was 88
+```
+
+The new test, `test_ingest_errors_name_the_upload_not_the_server_temp_file`, fails with the fix stashed:
+
+```
+E  assert 'sites.geojson' in "failed to read geojson: '/tmp/tmpkrjyditw.geojson' not recognized as being in a supported file format. ..."
+```
+
+### Not verified
+
+- The real Claude API path (no key here). `main` now defaults to `claude-sonnet-5-5` (PR #4), which this
+  round did not exercise.
+
+### Files touched
+
+`src/api/main.py`, `tests/test_api.py`, `README.md`, `IMPROVEMENTS.md`
