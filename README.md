@@ -104,7 +104,7 @@ Streamlit, five tabs: **Risk Map** (folium, calibrated risk overlay warped to WG
 
 ## 13. API
 
-FastAPI, `src/api/main.py`: `/health`, `/region`, `/predict`, `/assets/exposed`, `/infrastructure/exposed`, `/rainfall`, `/model/metrics`, `/grid?step=`, `/agent/analyze`, `/ingest`. Pydantic request/response models, validated coordinates (WGS84 range, no NaN/inf: 422), radius (0 to 20 km, the same limit the agent's tools enforce) and grid step, 404 for points outside the AOI, `/ingest` validation reports that flag out-of-range (e.g. swapped) coordinates and drop non-numeric ones, CORS limited to `CORS_ORIGINS`, rasters loaded at startup, a timing middleware that logs and headers every request's latency, and OpenAPI docs at `/docs`.
+FastAPI, `src/api/main.py`: `/health`, `/region`, `/predict`, `/assets/exposed`, `/infrastructure/exposed`, `/rainfall`, `/model/metrics`, `/grid?step=`, `/agent/analyze`, `/ingest`. Pydantic request/response models, validated coordinates (WGS84 range, no NaN/inf: 422), radius (0 to 20 km, the same limit the agent's tools enforce) and grid step, 404 for points outside the AOI, `/ingest` validation reports that flag out-of-range (e.g. swapped) coordinates and drop non-numeric ones (uploads are streamed to disk, capped at 50 MB with a 413, and parsed off the event loop), CORS limited to `CORS_ORIGINS`, rasters loaded at startup, a timing middleware that logs and headers every request's latency, and OpenAPI docs at `/docs`.
 
 ## 14. Setup
 
@@ -149,14 +149,14 @@ docker compose up --build
 - Selected model: **random_forest**, spatial-CV PR-AUC 0.82 ± 0.04 and CSI 0.52 against the GSI extent (base rate 5 %), versus 0.10 for a HAND-only baseline.
 - Hindcast on the portfolio (served scores are out-of-fold): 20 of the 23 assets that flooded in 2020 are flagged HIGH, with 16 further HIGH flags on assets that stayed dry.
 - Pipeline: features in 7 s (including D8 routing over ~360k cells with the 3 km margin), training and evaluation in 70 to 140 s on an 8-core laptop, depending on load.
-- **86/86 pytest tests pass**, including hydrology checks on synthetic DEMs with known answers, a no-leakage test on the feature list, and a check that the served map does not replay training labels. CI (`.github/workflows/tests.yml`) runs pyflakes and the suite on every push; the same steps pass in a fresh venv built from `requirements.txt`.
+- **88/88 pytest tests pass**, including hydrology checks on synthetic DEMs with known answers, a no-leakage test on the feature list, and a check that the served map does not replay training labels. CI (`.github/workflows/tests.yml`) runs pyflakes and the suite on every push; the same steps pass in a fresh venv built from `requirements.txt`.
 - API latency (in-process, p50, `benchmarks/api_latency_{before,after}.json`): `/predict` 18.1 → 2.1 ms, `/assets/exposed` 125 → 3.8 ms, `/agent/analyze` 129 → 10 ms, first request after startup 4,822 → 6 ms (the rasters now load at startup instead of on the first request). `/grid` is 34 → 31 ms while returning 1,500 blocks of 300 m instead of 480 coarse cells. Single-machine timings; expect run-to-run variation.
 
 ## 18. Verification performed
 
 - ✅ `scripts/fetch_data.py` ran against the public endpoints and produced the committed `data/hitoyoshi/raw/*`.
 - ✅ `scripts/run_pipeline.py` ran end to end and produced the committed `data/hitoyoshi/processed/*`; a rerun reproduces the same metrics.
-- ✅ `pytest`: 86/86 passing, locally and in a clean venv installed from `requirements.txt`.
+- ✅ `pytest`: 88/88 passing, locally and in a clean venv installed from `requirements.txt`.
 - ✅ Dashboard executed headlessly with Streamlit's `AppTest` (all tabs render, an agent query runs) without exceptions.
 - ✅ Every API endpoint exercised through FastAPI's `TestClient` in the test suite and the latency benchmark.
 - ⚠️ **LLM tool-calling path** (`llm_report`) is implemented against the Anthropic Messages API tool-use format but was **not exercised live** (no `ANTHROPIC_API_KEY` configured). The deterministic fallback, which shares the same tools and numbers, was verified instead.
