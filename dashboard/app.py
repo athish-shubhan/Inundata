@@ -191,7 +191,7 @@ with tab_client:
             result = ingest_client_dataset(tmp)
         finally:
             tmp.unlink(missing_ok=True)
-        rep = result.report if hasattr(result, "report") else result[1]
+        rep = result.report
         st.json(rep.to_dict())
 
 with tab_agent:

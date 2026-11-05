@@ -92,7 +92,7 @@ Hydrologically derived features rather than raw coordinates (flow-path HAND, flo
 
 ## 11. Agentic workflow
 
-`src/agents/agent.py` implements a Claude tool-calling loop (`llm_report`) over six read-only tools defined in `src/agents/tools.py` with JSON schemas: `get_region_info`, `assess_region`, `list_exposed_assets`, `list_exposed_infrastructure`, `get_event_rainfall`, `get_model_metrics`. A fully functional **deterministic fallback** (`deterministic_report`) runs automatically when `ANTHROPIC_API_KEY` is unset; this is how the repo runs out of the box and how it was verified. Both paths call the same tools and get identical numbers; only the phrasing differs. Every tool call is logged with latency (`tool_log`), the LLM loop is capped at 8 tool calls, and the toolset is a fixed whitelist; it cannot execute shell commands or write files.
+`src/agents/agent.py` implements a Claude tool-calling loop (`llm_report`) over six read-only tools defined in `src/agents/tools.py` with JSON schemas: `get_region_info`, `assess_region`, `list_exposed_assets`, `list_exposed_infrastructure`, `get_event_rainfall`, `get_model_metrics`. A fully functional **deterministic fallback** (`deterministic_report`) runs automatically when `ANTHROPIC_API_KEY` is unset; this is how the repo runs out of the box and how it was verified. Both paths call the same tools and get identical numbers; only the phrasing differs. Every tool call is logged with latency (`tool_log`), the LLM loop is capped at 8 tool calls in total (counted per call, not per model turn; `tests/test_llm_loop.py` drives it with a scripted fake client), and the toolset is a fixed whitelist; it cannot execute shell commands or write files. API calls time out after 60 s; if the LLM call fails (outage, timeout, rejected key) the request is answered by the deterministic path instead, with `mode: deterministic_fallback_llm_error`.
 
 Each scored location also reports whether that cell was inside the observed 2020 extent, so a report can say "HIGH risk, and flooded in 2020", and ranks its elevation, river distance and HAND against the rest of the valley ("lower than 93 % of scored cells") so a non-specialist can see why it scored that way. Named places come from the AOI config (`downtown`, `hitoyoshi station`, `city hall`, `castle`, `nishise`, `kuma village`, ...), radii can be given in km or m.
 
@@ -104,7 +104,7 @@ Streamlit, five tabs: **Risk Map** (folium, calibrated risk overlay warped to WG
 
 ## 13. API
 
-FastAPI, `src/api/main.py`: `/health`, `/region`, `/predict`, `/assets/exposed`, `/infrastructure/exposed`, `/rainfall`, `/model/metrics`, `/grid?step=`, `/agent/analyze`, `/ingest`. Pydantic request/response models, validated radius and grid step, 404 for points outside the AOI, CORS limited to `CORS_ORIGINS`, rasters loaded at startup, a timing middleware that logs and headers every request's latency, and OpenAPI docs at `/docs`.
+FastAPI, `src/api/main.py`: `/health`, `/region`, `/predict`, `/assets/exposed`, `/infrastructure/exposed`, `/rainfall`, `/model/metrics`, `/grid?step=`, `/agent/analyze`, `/ingest`. Pydantic request/response models, validated radius and grid step, 404 for points outside the AOI, `/ingest` validation reports that flag out-of-range (e.g. swapped) coordinates and drop non-numeric ones, CORS limited to `CORS_ORIGINS`, rasters loaded at startup, a timing middleware that logs and headers every request's latency, and OpenAPI docs at `/docs`.
 
 ## 14. Setup
 
@@ -149,14 +149,14 @@ docker compose up --build
 - Selected model: **random_forest**, spatial-CV PR-AUC 0.82 ± 0.04 and CSI 0.52 against the GSI extent (base rate 5 %), versus 0.10 for a HAND-only baseline.
 - Hindcast on the portfolio (served scores are out-of-fold): 20 of the 23 assets that flooded in 2020 are flagged HIGH, with 16 further HIGH flags on assets that stayed dry.
 - Pipeline: features in 7 s (including D8 routing over ~360k cells with the 3 km margin), training and evaluation in 70 to 140 s on an 8-core laptop, depending on load.
-- **58/58 pytest tests pass**, including hydrology checks on synthetic DEMs with known answers, a no-leakage test on the feature list, and a check that the served map does not replay training labels. CI (`.github/workflows/tests.yml`) runs pyflakes and the suite on every push; the same steps pass in a fresh venv built from `requirements.txt`.
+- **71/71 pytest tests pass**, including hydrology checks on synthetic DEMs with known answers, a no-leakage test on the feature list, and a check that the served map does not replay training labels. CI (`.github/workflows/tests.yml`) runs pyflakes and the suite on every push; the same steps pass in a fresh venv built from `requirements.txt`.
 - API latency (in-process, p50, `benchmarks/api_latency_{before,after}.json`): `/predict` 18.1 → 2.1 ms, `/assets/exposed` 125 → 3.8 ms, `/agent/analyze` 129 → 10 ms, first request after startup 4,822 → 6 ms (the rasters now load at startup instead of on the first request). `/grid` is 34 → 31 ms while returning 1,500 blocks of 300 m instead of 480 coarse cells. Single-machine timings; expect run-to-run variation.
 
 ## 18. Verification performed
 
 - ✅ `scripts/fetch_data.py` ran against the public endpoints and produced the committed `data/hitoyoshi/raw/*`.
 - ✅ `scripts/run_pipeline.py` ran end to end and produced the committed `data/hitoyoshi/processed/*`; a rerun reproduces the same metrics.
-- ✅ `pytest`: 58/58 passing, locally and in a clean venv installed from `requirements.txt`.
+- ✅ `pytest`: 71/71 passing, locally and in a clean venv installed from `requirements.txt`.
 - ✅ Dashboard executed headlessly with Streamlit's `AppTest` (all tabs render, an agent query runs) without exceptions.
 - ✅ Every API endpoint exercised through FastAPI's `TestClient` in the test suite and the latency benchmark.
 - ⚠️ **LLM tool-calling path** (`llm_report`) is implemented against the Anthropic Messages API tool-use format but was **not exercised live** (no `ANTHROPIC_API_KEY` configured). The deterministic fallback, which shares the same tools and numbers, was verified instead.

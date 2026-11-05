@@ -45,7 +45,7 @@ Each modality lands on the grid through the mechanism its type needs: rasters th
 
 ## Agent design
 
-A tool-calling loop over six read-only tools, capped at 8 calls, with a whitelisted dispatch table. Tool results are JSON with explicit `is_error` flags. The deterministic narrator produces the same sections from the same calls. Each location carries both the model's band and whether the cell flooded in 2020, which lets a report separate "the model thinks this is exposed" from "this actually flooded". Drivers are also given as ranks within the valley (elevation, river distance, HAND), which a risk manager can read without knowing what HAND is.
+A tool-calling loop over six read-only tools, capped at 8 calls in total (one model turn can request several, so the cap counts calls, not turns), with a whitelisted dispatch table. A failed or timed-out LLM call falls back to the deterministic narrator. Tool results are JSON with explicit `is_error` flags. The deterministic narrator produces the same sections from the same calls. Each location carries both the model's band and whether the cell flooded in 2020, which lets a report separate "the model thinks this is exposed" from "this actually flooded". Drivers are also given as ranks within the valley (elevation, river distance, HAND), which a risk manager can read without knowing what HAND is.
 
 ## Ingestion / handling messy client data
 

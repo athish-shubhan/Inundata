@@ -93,3 +93,17 @@ def test_ingest_csv():
 def test_ingest_bad_format():
     r = client.post("/ingest", files={"file": ("bad.xyz", b"junk", "application/octet-stream")})
     assert r.status_code == 400
+
+
+def test_ingest_csv_out_of_range_reported_not_ok():
+    r = client.post("/ingest", files={"file": ("swapped.csv", b"id,lat,lon\n1,130.75,32.21\n", "text/csv")})
+    assert r.status_code == 200
+    assert r.json()["ok"] is False and "outside lat" in r.json()["errors"][0]
+
+
+def test_ingest_raster():
+    with open(DATA_RAW / "terrain" / "copernicus_dem30.tif", "rb") as f:
+        r = client.post("/ingest", files={"file": ("copernicus_dem30.tif", f, "image/tiff")})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["source"] == "copernicus_dem30.tif" and body["meta"]["crs"]
