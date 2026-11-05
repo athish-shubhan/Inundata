@@ -116,3 +116,13 @@ def test_feature_stack_on_analysis_grid():
         assert name in layers
     assert 0 < np.nanmean(layers["flooded"]) < 0.2
     assert np.nanmin(layers["hand_m"]) >= 0
+
+
+def test_cell_of_treats_invalid_coordinates_as_outside():
+    from src.ml.model import RiskModel
+    grid = RiskModel().grid
+    lat = np.array([32.2158, np.nan, 1000.0, 32.2, np.inf, 91.5])
+    lon = np.array([130.7535, 130.75, 130.75, -500.0, 130.7, 130.7])
+    r, c, inside = grid.cell_of(lat, lon)
+    assert inside.tolist() == [True, False, False, False, False, False]
+    assert (r[1:] == -1).all() and (c[1:] == -1).all()

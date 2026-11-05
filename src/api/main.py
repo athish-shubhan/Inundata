@@ -2,6 +2,7 @@ import tempfile
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,6 +16,9 @@ from src.ingestion.client_adapter import ingest_client_dataset
 from src.services.logging import get_logger
 
 log = get_logger("api")
+Lat = Annotated[float, Query(ge=-90, le=90, allow_inf_nan=False, description="WGS84 latitude")]
+Lon = Annotated[float, Query(ge=-180, le=180, allow_inf_nan=False, description="WGS84 longitude")]
+Radius = Annotated[float, Query(gt=0, le=tools.MAX_RADIUS_KM, description="search radius in km")]
 ARTIFACTS = [DATA_PROC / f for f in ("features.tif", "risk.tif", "metrics.json")]
 
 
@@ -63,7 +67,7 @@ def region():
 
 
 @app.get("/predict", response_model=PredictResponse)
-def predict(lat: float, lon: float):
+def predict(lat: Lat, lon: Lon):
     try:
         return require_model().predict_point(lat, lon)
     except ValueError as e:
@@ -71,13 +75,13 @@ def predict(lat: float, lon: float):
 
 
 @app.get("/assets/exposed", response_model=ExposedAssetsResponse)
-def exposed_assets(lat: float, lon: float, radius_km: float = Query(2.0, gt=0, le=20)):
+def exposed_assets(lat: Lat, lon: Lon, radius_km: Radius = 2.0):
     require_model()
     return tools.list_exposed_assets(lat, lon, radius_km)
 
 
 @app.get("/infrastructure/exposed", response_model=ExposedInfrastructureResponse)
-def exposed_infrastructure(lat: float, lon: float, radius_km: float = Query(2.0, gt=0, le=20)):
+def exposed_infrastructure(lat: Lat, lon: Lon, radius_km: Radius = 2.0):
     require_model()
     return tools.list_exposed_infrastructure(lat, lon, radius_km)
 
