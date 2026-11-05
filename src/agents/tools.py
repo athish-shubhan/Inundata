@@ -37,6 +37,16 @@ def _infrastructure() -> pd.DataFrame:
     return pd.DataFrame(gdf.drop(columns="geometry")).assign(lat=gdf.geometry.y, lon=gdf.geometry.x)
 
 
+MAX_RADIUS_KM = 20.0  # the whole AOI fits inside 20 km of any point in it
+
+
+def _check_radius(radius_km: float) -> float:
+    radius_km = float(radius_km)
+    if not 0 < radius_km <= MAX_RADIUS_KM:
+        raise ValueError(f"radius_km must be greater than 0 and at most {MAX_RADIUS_KM:g}, got {radius_km:g}")
+    return radius_km
+
+
 def _within(df: pd.DataFrame, lat: float, lon: float, radius_km: float) -> pd.DataFrame:
     df = df.assign(dist_km=haversine_km(lat, lon, df.lat.to_numpy(), df.lon.to_numpy()))
     return df[df.dist_km <= radius_km]
@@ -53,6 +63,7 @@ def assess_region(lat: float, lon: float) -> dict:
 
 
 def list_exposed_assets(lat: float, lon: float, radius_km: float = 2.0) -> dict:
+    radius_km = _check_radius(radius_km)
     near = _within(_portfolio(), lat, lon, radius_km)
     if near.empty:
         return {"n_assets": 0, "total_value_jpy": 0, "n_high_risk": 0, "high_risk_value_jpy": 0, "assets": []}
@@ -65,6 +76,7 @@ def list_exposed_assets(lat: float, lon: float, radius_km: float = 2.0) -> dict:
 
 
 def list_exposed_infrastructure(lat: float, lon: float, radius_km: float = 2.0) -> dict:
+    radius_km = _check_radius(radius_km)
     near = _within(_infrastructure(), lat, lon, radius_km)
     if near.empty:
         return {"n_sites": 0, "n_high_risk": 0, "sites": []}
@@ -90,7 +102,8 @@ def get_model_metrics() -> dict:
 
 
 _POINT = {"lat": {"type": "number"}, "lon": {"type": "number"}}
-_RADIUS = {"radius_km": {"type": "number", "description": "search radius, default 2"}}
+_RADIUS = {"radius_km": {"type": "number", "exclusiveMinimum": 0, "maximum": MAX_RADIUS_KM,
+                         "description": f"search radius in km, default 2, at most {MAX_RADIUS_KM:g}"}}
 
 TOOL_SPECS = [
     {"name": "get_region_info", "description": "Get the AOI name, bounding box, flood-event context and the named places the system knows.",

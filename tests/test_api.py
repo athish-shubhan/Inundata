@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from src.api.main import app
@@ -107,3 +108,17 @@ def test_ingest_raster():
     assert r.status_code == 200
     body = r.json()
     assert body["source"] == "copernicus_dem30.tif" and body["meta"]["crs"]
+
+
+@pytest.mark.parametrize("params", [{"lat": 1000, "lon": 130.75}, {"lat": 32.2, "lon": -500},
+                                    {"lat": "nan", "lon": "nan"}, {"lat": "inf", "lon": 130.7}])
+def test_predict_rejects_invalid_coordinates(params):
+    r = client.get("/predict", params=params)
+    assert r.status_code == 422, r.text
+
+
+@pytest.mark.parametrize("path", ["/assets/exposed", "/infrastructure/exposed"])
+def test_exposure_rejects_invalid_coordinates_and_radius(path):
+    assert client.get(path, params={"lat": 95, "lon": 130.75}).status_code == 422
+    assert client.get(path, params=DOWNTOWN | {"radius_km": 21}).status_code == 422
+    assert client.get(path, params=DOWNTOWN | {"radius_km": 20}).status_code == 200

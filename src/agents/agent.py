@@ -3,13 +3,14 @@ import re
 import time
 
 from src.agents.llm import LLM_ERRORS, SYSTEM_PROMPT, client, has_llm
-from src.agents.tools import DISPATCH, TOOL_SPECS, call_tool
+from src.agents.tools import DISPATCH, MAX_RADIUS_KM, TOOL_SPECS, call_tool
 from src.config import AOI, LLM_MODEL
 from src.services.logging import get_logger
 
 logger = get_logger("agent")
 
 MAX_TOOL_CALLS = 8
+MIN_RADIUS_KM = 0.05  # below one or two grid cells a radius search is meaningless
 PLACES = {name: tuple(ll) for name, ll in AOI["places"].items()}
 DEFAULT_PLACE = AOI["default_place"]
 FEATURE_LABELS = {"elev_m": "elevation", "slope_deg": "slope", "hand_m": "HAND", "river_dist_m": "distance to river",
@@ -27,8 +28,10 @@ def parse_query(q: str) -> dict:
         place = next((p for p in sorted(PLACES, key=len, reverse=True) if p in ql), DEFAULT_PLACE)
         lat, lon = PLACES[place]
     r = re.search(r"(\d+(?:\.\d+)?)\s*(km|kilomet(?:er|re)s?|m|met(?:er|re)s?)\b", ql)
-    radius = 2.0 if not r else float(r.group(1)) / (1 if r.group(2).startswith("k") else 1000)
-    return {"lat": lat, "lon": lon, "radius_km": radius, "place": place}
+    asked = 2.0 if not r else float(r.group(1)) / (1 if r.group(2).startswith("k") else 1000)
+    radius = min(max(asked, MIN_RADIUS_KM), MAX_RADIUS_KM)
+    return {"lat": lat, "lon": lon, "radius_km": radius, "place": place,
+            "radius_clamped_from": None if radius == asked else asked}
 
 
 def _score_text(risk: dict) -> str:
@@ -63,7 +66,10 @@ def deterministic_report(query: str, reason: str = "no LLM API key configured") 
         f"Flood susceptibility at {where} is {_score_text(risk)}. "
         f"Within {p['radius_km']:g} km: {assets['n_assets']} client assets (¥{assets['total_value_jpy']:,}), "
         f"{assets['n_high_risk']} HIGH risk (¥{assets['high_risk_value_jpy']:,}); "
-        f"{infra['n_sites']} critical-infrastructure sites, {infra['n_high_risk']} HIGH risk.", "",
+        f"{infra['n_sites']} critical-infrastructure sites, {infra['n_high_risk']} HIGH risk."
+        + (f" (Requested radius {p['radius_clamped_from']:g} km is outside the supported "
+           f"{MIN_RADIUS_KM:g} to {MAX_RADIUS_KM:g} km, so {p['radius_km']:g} km was used.)"
+           if p["radius_clamped_from"] is not None else ""), "",
         "## Event Context",
         f"- Rainfall {rain['window']}: up to {totals['event_total_mm']:.0f} mm, peaking at {totals['event_max_day_mm']:.0f} mm "
         f"on {totals['event_max_day']}, against {totals['baseline_total_mm']:.0f} mm over {rain['baseline_window']} "

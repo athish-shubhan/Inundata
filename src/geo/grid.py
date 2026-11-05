@@ -42,10 +42,25 @@ class Grid:
         return np.asarray(lon).reshape(self.shape), np.asarray(lat).reshape(self.shape)
 
     def cell_of(self, lat, lon) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Row/col for WGS84 points, plus a mask of which points fall inside the grid."""
-        x, y = transform(CRS, self.crs, np.atleast_1d(lon), np.atleast_1d(lat))
-        r, c = rowcol(self.transform, x, y)
-        r, c = np.asarray(r), np.asarray(c)
+        """Row/col for WGS84 points, plus a mask of which points fall inside the grid.
+
+        NaN, infinite or out-of-range coordinates are reported as outside (row/col -1)
+        instead of reaching PROJ, which raises or returns inf for them.
+        """
+        lat = np.atleast_1d(np.asarray(lat, dtype=float))
+        lon = np.atleast_1d(np.asarray(lon, dtype=float))
+        valid = np.isfinite(lat) & np.isfinite(lon) & (np.abs(lat) <= 90) & (np.abs(lon) <= 180)
+        r = np.full(lat.shape, -1, dtype=int)
+        c = np.full(lat.shape, -1, dtype=int)
+        if valid.any():
+            x, y = transform(CRS, self.crs, lon[valid], lat[valid])
+            x, y = np.asarray(x), np.asarray(y)
+            ok = np.isfinite(x) & np.isfinite(y)
+            rv, cv = np.full(x.shape, -1, dtype=int), np.full(x.shape, -1, dtype=int)
+            if ok.any():
+                rr, cc = rowcol(self.transform, x[ok], y[ok])
+                rv[ok], cv[ok] = np.asarray(rr), np.asarray(cc)
+            r[valid], c[valid] = rv, cv
         inside = (r >= 0) & (r < self.height) & (c >= 0) & (c < self.width)
         return r, c, inside
 

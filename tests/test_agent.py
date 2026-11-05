@@ -1,5 +1,7 @@
+import pytest
+
 from src.agents.agent import DEFAULT_PLACE, PLACES, deterministic_report, parse_query
-from src.agents.tools import DISPATCH, TOOL_SPECS, call_tool, haversine_km
+from src.agents.tools import DISPATCH, MAX_RADIUS_KM, TOOL_SPECS, call_tool, haversine_km
 
 
 def test_parse_query_explicit_coords():
@@ -57,3 +59,36 @@ def test_call_tool_unknown_tool_logs_error():
 def test_haversine():
     assert haversine_km(32.2, 130.75, 32.2, 130.75) == 0
     assert abs(haversine_km(32.0, 130.0, 33.0, 130.0) - 111.2) < 0.5
+
+
+def test_parse_query_clamps_radius_to_supported_range():
+    far = parse_query("downtown within 300 km")
+    assert far["radius_km"] == MAX_RADIUS_KM and far["radius_clamped_from"] == 300
+    tiny = parse_query("downtown within 0 km")
+    assert tiny["radius_km"] == 0.05 and tiny["radius_clamped_from"] == 0
+    assert parse_query("downtown within 2 km")["radius_clamped_from"] is None
+
+
+def test_report_says_when_radius_was_clamped():
+    md = deterministic_report("downtown within 300 km")["report_markdown"]
+    assert "Requested radius 300 km is outside the supported" in md and f"Within {MAX_RADIUS_KM:g} km" in md
+
+
+@pytest.mark.parametrize("radius", [-3, 0, 5000])
+def test_tools_reject_out_of_range_radius(radius):
+    log = []
+    for name in ("list_exposed_assets", "list_exposed_infrastructure"):
+        out = call_tool(name, {"lat": 32.2158, "lon": 130.7535, "radius_km": radius}, log)
+        assert "radius_km must be" in out["error"]
+    assert not any(t["ok"] for t in log)
+
+
+def test_tool_spec_advertises_radius_limit():
+    spec = next(t for t in TOOL_SPECS if t["name"] == "list_exposed_assets")
+    assert spec["input_schema"]["properties"]["radius_km"]["maximum"] == MAX_RADIUS_KM
+
+
+@pytest.mark.parametrize("query", ["risk at 91.5, 130.7", "risk at 32.2, 999.0"])
+def test_report_for_impossible_coordinates_is_outside_area(query):
+    md = deterministic_report(query)["report_markdown"]
+    assert "outside the analysis area" in md and "PROJ" not in md
