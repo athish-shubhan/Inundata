@@ -4,6 +4,33 @@ An independent geospatial flood-intelligence platform. It takes a real disaster 
 
 > **The client engagement described below is simulated**, built to work through the full problem end to end. Elevation, satellite imagery, rainfall, the river network, critical infrastructure, and the flood extent used as ground truth are all real public data for a real event. Only the client portfolio's attributes (values, year built, occupants) are synthetic; its locations are real building footprints.
 
+
+## Quick start (no API keys, no downloads)
+
+```bash
+git clone https://github.com/athish-shubhan/Inundata.git && cd Inundata
+make setup && make demo        # needs Python 3.12; prints risk, drivers and exposure for downtown Hitoyoshi
+```
+
+Then, optionally, `make dashboard` (http://localhost:8501) or `make api` (http://localhost:8000/docs). The raw and processed data for the study area are committed (about 24 MB), so nothing is downloaded. `make test` runs the suite and `make lint` runs pyflakes. First-time dependency install dominates the time; the demo itself runs on the committed rasters.
+
+## Demo
+
+<!-- DEMO -->
+
+## Architecture overview
+
+```mermaid
+flowchart LR
+  F[fetch_data.py<br/>DEM, Sentinel-2, OSM, weather, GSI extent] --> G[src/geo<br/>30 m grid, HAND, fusion]
+  G --> X[features.tif]
+  X --> M[src/ml<br/>spatial CV, calibration]
+  M --> R[risk.tif + metrics.json]
+  R --> A[src/agents<br/>tools + report]
+  R --> P[src/api<br/>FastAPI]
+  R --> D[dashboard<br/>Streamlit]
+```
+
 ---
 
 ## 1. Problem
@@ -110,8 +137,7 @@ FastAPI, `src/api/main.py`: `/health`, `/region`, `/predict`, `/assets/exposed`,
 
 ```bash
 git clone https://github.com/athish-shubhan/Inundata.git && cd Inundata
-python3.12 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+make setup             # creates .venv and installs requirements.txt
 cp .env.example .env   # optional: add ANTHROPIC_API_KEY to enable the real LLM agent path
 ```
 
@@ -125,9 +151,10 @@ python scripts/run_pipeline.py     # features.tif → CV + training → risk.tif
 ## 15. Running instructions
 
 ```bash
-uvicorn src.api.main:app --reload --port 8000      # API + docs at http://localhost:8000/docs
+make api   # uvicorn src.api.main:app --port 8000      # API + docs at http://localhost:8000/docs
 streamlit run dashboard/app.py                       # dashboard at http://localhost:8501
 python -m pytest -q                                  # test suite
+python scripts/demo.py --place nishise   # CLI risk + drivers for any named place
 python scripts/bench_api.py --lat 32.2158 --lon 130.7535   # in-process API latency
 ```
 
@@ -148,8 +175,8 @@ docker compose up --build
 
 - Selected model: **random_forest**, spatial-CV PR-AUC 0.82 ± 0.04 and CSI 0.52 against the GSI extent (base rate 5 %), versus 0.10 for a HAND-only baseline.
 - Hindcast on the portfolio (served scores are out-of-fold): 20 of the 23 assets that flooded in 2020 are flagged HIGH, with 16 further HIGH flags on assets that stayed dry.
-- Pipeline: features in 7 s (including D8 routing over ~360k cells with the 3 km margin), training and evaluation in 70 to 140 s on an 8-core laptop, depending on load.
-- **89/89 pytest tests pass**, including hydrology checks on synthetic DEMs with known answers, a no-leakage test on the feature list, and a check that the served map does not replay training labels. CI (`.github/workflows/tests.yml`) runs pyflakes and the suite on every push; the same steps pass in a fresh venv built from `requirements.txt`.
+- Pipeline wall-clock time: not re-measured for this release (per-model fit + CV seconds are recorded in `metrics.json`). Provenance of every figure here is listed in [`results/README.md`](results/README.md); `results/portfolio_hindcast.json` backs the hindcast line.
+- **89/89 pytest tests pass** (`results/test_run.txt`), including hydrology checks on synthetic DEMs with known answers, a no-leakage test on the feature list, and a check that the served map does not replay training labels. CI (`.github/workflows/tests.yml`) runs pyflakes and the suite on every push; the same steps pass in a fresh venv built from `requirements.txt`.
 - API latency (in-process, p50, `benchmarks/api_latency_{before,after}.json`): `/predict` 18.1 → 2.1 ms, `/assets/exposed` 125 → 3.8 ms, `/agent/analyze` 129 → 10 ms, first request after startup 4,822 → 6 ms (the rasters now load at startup instead of on the first request). `/grid` is 34 → 31 ms while returning 1,500 blocks of 300 m instead of 480 coarse cells. Single-machine timings; expect run-to-run variation.
 
 ## 18. Verification performed

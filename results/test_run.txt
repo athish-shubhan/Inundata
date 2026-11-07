@@ -1,0 +1,5 @@
+$ python -m pyflakes src scripts dashboard tests
+(no output, exit 0)
+$ python -m pytest -q
+89 passed, 643 warnings in 449.34s (0:07:29)
+Environment: macOS Darwin 25.2 (Apple Silicon), Python 3.12.11, fresh venv from requirements.txt; machine under heavy unrelated load.

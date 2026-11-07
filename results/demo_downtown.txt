@@ -1,0 +1,17 @@
+Location: 32.2158, 130.7535
+Flood risk: HIGH (calibrated score 0.56)
+Flooded in the 2020-07-04 GSI extent: no (flooded fraction of cell 0.02)
+Drivers:
+  elev_m           108.924 m  (lower than 93% of scored cells)
+  slope_deg          1.069 deg
+  hand_m             4.746 m  (lower than 70% of scored cells)
+  river_dist_m     468.615 m  (lower than 87% of scored cells)
+  tpi_m            -12.756 
+  log_flow_acc       2.253 
+  ndvi_pre           0.170 
+  ndwi_pre          -0.214 
+  ndbi_pre           0.182 
+
+Within 2.0 km:
+  client assets: n_assets=53, total_value_jpy=2323681950, n_high_risk=25, high_risk_value_jpy=1117086343
+  critical infrastructure: n_sites=37, n_high_risk=17
