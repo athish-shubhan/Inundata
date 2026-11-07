@@ -20,6 +20,10 @@ Then, optionally, `make dashboard` (http://localhost:8501) or `make api` (http:/
 
 *Output of `make demo`: flood risk, drivers and nearby assets for downtown Hitoyoshi.*
 
+![Dashboard](docs/dashboard.gif)
+
+*Streamlit dashboard (`make dashboard`): risk map with client assets, spatial vs random cross-validation table, and the satellite proxy vs GSI flood-extent reference.*
+
 ## Architecture overview
 
 ```mermaid
