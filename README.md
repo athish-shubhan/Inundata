@@ -16,7 +16,9 @@ Then, optionally, `make dashboard` (http://localhost:8501) or `make api` (http:/
 
 ## Demo
 
-<!-- DEMO -->
+![Demo](docs/demo.gif)
+
+*Output of `make demo`: flood risk, drivers and nearby assets for downtown Hitoyoshi.*
 
 ## Architecture overview
 
