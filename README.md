@@ -110,10 +110,10 @@ Four candidates, each scored with **spatial** cross-validation: `StratifiedGroup
 
 *(means ± std over 5 spatial folds; CSI is the critical success index, IoU of the flooded class. Regenerate with `python scripts/run_pipeline.py`; numbers are from this repo's last run.)*
 
-- **Selection rule:** highest mean spatial-CV PR-AUC. The random-CV column is about 0.1 higher for the tree models: that gap is the leakage a random split would have hidden.
+- **Selection rule:** highest mean spatial-CV PR-AUC. The same folds both pick the winner and report its score, so 0.82 is slightly optimistic; random forest and gradient boosting are within one fold standard deviation of each other (0.820 vs 0.813), so the choice between them is not a measured difference. The random-CV column is about 0.1 higher for the tree models: that gap is the leakage a random split would have hidden.
 - **Calibration:** out-of-fold scores are isotonically calibrated with cross-fitting (each fold mapped by a calibrator fit on the others). Brier score 0.0209 raw → 0.0195 calibrated, against 0.0475 for predicting the base rate everywhere. HIGH starts at the trained operating threshold (0.41).
 - **What is served:** these cross-fitted scores, not the final model's. Scoring the grid with the final model looked better (pooled PR-AUC 0.92) only because it had seen 40k of these labels and their neighbours, and it pushed about nine times as many cells to ≥ 0.99. A test (`test_served_scores_do_not_replay_training_labels`) keeps the served map from scoring above the spatial-CV estimate. The final model in `model.joblib` is for locations outside this grid.
-- **Out-of-fold errors** (`src/ml/evaluate.py`, every cell scored by a model that never saw its block): precision 0.68, recall 0.76 at the operating threshold; false negatives and positives are written to `error_analysis.csv` and mapped in the dashboard.
+- **Out-of-fold errors** (`src/ml/evaluate.py`, every cell scored by a model that never saw its block): precision 0.68, recall 0.76 at the operating threshold (reproduced from the committed `risk.tif` with `python -m src.ml.evaluate`; that threshold is the best-F1 point of these same out-of-fold scores, so these two figures are mildly optimistic); false negatives and positives are written to `error_analysis.csv` and mapped in the dashboard.
 - **Was the old label any good?** No. NDWI change (post minus pre > 0.04) agrees with the GSI extent at CSI 0.13 (recall 0.44, precision 0.16), and a random forest trained on it scores PR-AUC 0.27 against GSI, versus 0.82 when trained on GSI. That measured gap is why v2 switched label.
 - **What drives it:** permutation importance, measured on held-out spatial folds, is led by elevation (0.64) and distance to the main river (0.38); HAND, flow accumulation, TPI, slope and NDVI follow at 0.05 to 0.07. HAND alone is a weak predictor here (the baseline row) because it is measured to the nearest drainage including small tributaries, while the 2020 flood was the Kuma main stem backing up across the valley floor; see the HAND-band breakdown from `python -m src.ml.evaluate`. HAND measured only to the main river was tried and did not help (PR-AUC 0.808 vs 0.820): half the grid drains out of the AOI before reaching the mapped channel, so it is undefined there.
 
@@ -180,7 +180,7 @@ docker compose up --build
 ## 17. Results (this repo's own last run)
 
 - Selected model: **random_forest**, spatial-CV PR-AUC 0.82 ± 0.04 and CSI 0.52 against the GSI extent (base rate 5 %), versus 0.10 for a HAND-only baseline.
-- Hindcast on the portfolio (served scores are out-of-fold): 20 of the 23 assets that flooded in 2020 are flagged HIGH, with 16 further HIGH flags on assets that stayed dry.
+- Hindcast on the portfolio (served scores are out-of-fold): 20 of the 23 assets that flooded in 2020 are flagged HIGH, with 16 further HIGH flags on assets that stayed dry. The HIGH cut-off was tuned on the same labels (see above) and the assets are simulated, so treat this as an illustration, not a validated detection rate.
 - Pipeline wall-clock time: not re-measured for this release (per-model fit + CV seconds are recorded in `metrics.json`). Provenance of every figure here is listed in [`results/README.md`](results/README.md); `results/portfolio_hindcast.json` backs the hindcast line.
 - **89/89 pytest tests pass** (`results/test_run.txt`), including hydrology checks on synthetic DEMs with known answers, a no-leakage test on the feature list, and a check that the served map does not replay training labels. CI (`.github/workflows/tests.yml`) runs pyflakes and the suite on every push; the same steps pass in a fresh venv built from `requirements.txt`.
 - API latency (in-process, p50, `benchmarks/api_latency_{before,after}.json`): `/predict` 18.1 → 2.1 ms, `/assets/exposed` 125 → 3.8 ms, `/agent/analyze` 129 → 10 ms, first request after startup 4,822 → 6 ms (the rasters now load at startup instead of on the first request). `/grid` is 34 → 31 ms while returning 1,500 blocks of 300 m instead of 480 coarse cells. Single-machine timings; expect run-to-run variation.
@@ -219,11 +219,10 @@ docker compose up --build
 
 v1 used a 480-cell, ~650 m grid built from SRTM point samples, a hand-digitised river line, a single-elevation "HAND", and NDWI change as the label. Its bounding box (32.74–32.86 N) also sat about 65 km north of Hitoyoshi, which is at 32.21 N. v2 corrects the AOI, moves to a 30 m grid with real flow-routing hydrology and OSM geometry, trains on the official flood extent, and measures how weak the old proxy label was (§9).
 
-## Technical highlights
+## Where to look
 
 | Capability | Evidence in this repo |
 |---|---|
-| Python | Entire codebase; type-hinted, tested |
 | Data analytics / ML | `src/ml/`: four models, spatial vs random CV, inner-fold thresholds, cross-fitted calibration, permutation importance, out-of-fold error analysis |
 | Geospatial data processing | `src/geo/grid.py`, `terrain.py`: one metric grid, resampling chosen per layer, rasterisation, distance transforms |
 | Hydrology | `src/geo/hydrology.py`: Priority-Flood, D8, flow accumulation, flow-path HAND, tested on synthetic DEMs |
@@ -239,6 +238,6 @@ v1 used a 480-cell, ~650 m grid built from SRTM point samples, a hand-digitised 
 
 Built by Athish Shubhan. See `docs/design_notes.md` for the reasoning behind each design decision.
 
-## License
+## Data attribution and license
 
-MIT. See [`LICENSE`](LICENSE).
+Code: MIT, see [`LICENSE`](LICENSE). The committed data keeps its source licenses, listed in [`docs/data_sources.md`](docs/data_sources.md): Copernicus DEM GLO-30 and contains modified Copernicus Sentinel data (2020); flood extent from the Geospatial Information Authority of Japan (GSI); river, facilities and building locations from OpenStreetMap, (c) OpenStreetMap contributors, ODbL; rainfall from Open-Meteo (CC BY 4.0, ERA5-based). Client attributes are synthetic.
