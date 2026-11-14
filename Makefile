@@ -1,4 +1,4 @@
-.PHONY: setup test lint demo api dashboard
+.PHONY: setup test lint demo api dashboard viewer viewer-data
 
 PY = .venv/bin/python
 
@@ -20,3 +20,10 @@ api:
 
 dashboard:
 	.venv/bin/streamlit run dashboard/app.py
+
+# 3D viewer: re-export the pipeline outputs, then serve docs/viewer on http://localhost:8765
+viewer-data:
+	$(PY) scripts/export_viewer.py
+
+viewer: viewer-data
+	cd docs/viewer && ../../$(PY) -m http.server 8765
