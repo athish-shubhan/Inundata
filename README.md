@@ -24,6 +24,19 @@ Then, optionally, `make dashboard` (http://localhost:8501) or `make api` (http:/
 
 *Streamlit dashboard (`make dashboard`): risk map with client assets, spatial vs random cross-validation table, and the satellite proxy vs GSI flood-extent reference.*
 
+### 3D viewer
+
+![3D viewer tour](docs/viewer.gif)
+
+*The 3D viewer (`make viewer`, then http://localhost:8765): the observed flood, then the terrain baseline as the height above the channel rises. [Full 27-second tour (mp4)](docs/viewer.mp4).*
+
+The study area as a terrain model you can orbit, built from the same rasters the model uses. Five layers: terrain, the observed flood, model risk, model vs observed, and the terrain-only baseline (height above the nearest channel) vs observed. Two sliders make the trade-off visible:
+
+- **Risk threshold.** At the operating point (0.41) the model catches 74% of the observed flood cells and 67% of the cells it flags really flooded. Drag it to see misses turn into false alarms.
+- **Height above channel.** The baseline needs about 8 m to reach the same recall (76%), and at that level only 11% of what it flags flooded. That gap is what the model adds over terrain alone.
+
+Every figure in the panel is counted in the browser from the exported cells, so the picture and the numbers cannot disagree. The baseline layer is a terrain index, not a hydraulic simulation. The page is static (`docs/viewer/`, three.js vendored, no build step); `scripts/export_viewer.py` repacks `features.tif`, `risk.tif` and the vector data into two small files, and a test fails if they fall out of sync with the pipeline outputs.
+
 ## Architecture overview
 
 ```mermaid
@@ -35,6 +48,7 @@ flowchart LR
   R --> A[src/agents<br/>tools + report]
   R --> P[src/api<br/>FastAPI]
   R --> D[dashboard<br/>Streamlit]
+  R --> V[docs/viewer<br/>3D terrain, three.js]
 ```
 
 ---
