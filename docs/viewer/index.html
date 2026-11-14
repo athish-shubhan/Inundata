@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inundata · 3D flood viewer</title>
+<meta name="description" content="Interactive 3D view of the July 2020 Kuma River flood: terrain, observed extent and model risk on a 30 m grid.">
+<style>
+  :root {
+    --bg: #0b1016; --panel: rgba(17, 24, 33, 0.9); --line: #263241; --ink: #e8edf2; --muted: #93a1b0;
+    --accent: #6fb7ff; --hit: #648fff; --miss: #dc267f; --fa: #ffb000;
+    font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); overflow: hidden; }
+  #stage { position: fixed; inset: 0; }
+  #stage canvas { display: block; }
+  #loading { position: fixed; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 15px; }
+
+  #panel {
+    position: fixed; top: 16px; left: 16px; width: 318px; max-height: calc(100% - 32px); overflow-y: auto;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 18px 14px;
+    backdrop-filter: blur(10px); transition: transform 0.25s ease, opacity 0.25s ease;
+  }
+  .panel-closed #panel { transform: translateX(-340px); opacity: 0; pointer-events: none; }
+  #panel-toggle {
+    position: fixed; top: 16px; right: 16px; background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 10px; padding: 8px 12px; font: inherit; font-size: 13px; cursor: pointer;
+  }
+  h1 { margin: 0; font-size: 20px; letter-spacing: 0.01em; font-weight: 650; }
+  h1 span { color: var(--accent); }
+  .sub { margin: 4px 0 0; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+  h2 { margin: 18px 0 8px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted); }
+
+  #modes { display: grid; gap: 6px; }
+  #modes button {
+    text-align: left; background: transparent; color: var(--ink); border: 1px solid var(--line); border-radius: 9px;
+    padding: 8px 11px; font: inherit; font-size: 13.5px; cursor: pointer; transition: background 0.15s, border-color 0.15s;
+  }
+  #modes button:hover { border-color: #3c4d61; }
+  #modes button[aria-pressed="true"] { background: rgba(111, 183, 255, 0.16); border-color: var(--accent); }
+  #mode-note { margin: 10px 0 0; font-size: 12.5px; line-height: 1.5; color: #c3ccd6; min-height: 56px; }
+
+  .row { margin-top: 12px; }
+  .row label { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--muted); margin-bottom: 4px; }
+  .row label output { color: var(--ink); font-variant-numeric: tabular-nums; }
+  input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
+  .link { background: none; border: 0; color: var(--accent); font: inherit; font-size: 12px; padding: 4px 0 0; cursor: pointer; }
+
+  #stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+  .stat { border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; }
+  .stat b { display: block; font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .stat b.cap { text-transform: capitalize; }
+  .stat span { display: block; margin-top: 2px; font-size: 11.5px; line-height: 1.35; color: var(--muted); }
+
+  .legend { margin-top: 12px; font-size: 12px; color: #c3ccd6; }
+  .legend .bar { height: 9px; border-radius: 5px; background: linear-gradient(90deg, #ffeda0, #feb24c, #f03b20, #960026); }
+  .legend .ends { display: flex; justify-content: space-between; margin-top: 3px; color: var(--muted); }
+  .key { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+  .sw { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+
+  .checks { display: grid; gap: 5px; font-size: 13px; }
+  .checks label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+  .checks input { accent-color: var(--accent); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+
+  .actions { display: flex; gap: 8px; margin-top: 16px; }
+  .actions button {
+    flex: 1; padding: 9px 10px; border-radius: 9px; border: 1px solid var(--line); background: transparent; color: var(--ink);
+    font: inherit; font-size: 13px; cursor: pointer;
+  }
+  .actions #tour { background: var(--accent); border-color: var(--accent); color: #06121f; font-weight: 600; }
+  .foot { margin: 14px 0 0; font-size: 11px; line-height: 1.5; color: var(--muted); }
+  .foot a { color: var(--accent); }
+
+  #caption {
+    position: fixed; left: 50%; bottom: 34px; transform: translateX(-50%); max-width: min(760px, calc(100% - 40px));
+    background: rgba(9, 14, 20, 0.86); border: 1px solid var(--line); border-radius: 12px; padding: 12px 18px;
+    font-size: 16px; line-height: 1.45; text-align: center;
+  }
+  #tip {
+    position: fixed; z-index: 5; width: 232px; pointer-events: none; background: rgba(9, 14, 20, 0.95);
+    border: 1px solid var(--line); border-radius: 9px; padding: 9px 11px; font-size: 12.5px; line-height: 1.5;
+  }
+  @media (min-width: 901px) {
+    body:not(.panel-closed) #caption { left: calc(50% + 170px); max-width: min(720px, calc(100% - 400px)); }
+  }
+  [hidden] { display: none !important; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @media (max-width: 640px) {
+    #panel { width: calc(100% - 32px); max-height: 52%; top: auto; bottom: 16px; }
+    .panel-closed #panel { transform: translateY(120%); }
+    #caption { bottom: auto; top: 60px; font-size: 14px; }
+  }
+  @media (prefers-reduced-motion: reduce) { #panel { transition: none; } }
+</style>
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
+</head>
+<body>
+<div id="stage" aria-label="3D terrain view"></div>
+<div id="loading">Loading terrain…</div>
+
+<button id="panel-toggle" type="button" aria-controls="panel">Panel</button>
+
+<aside id="panel">
+  <h1><span>Inundata</span> · 3D viewer</h1>
+  <p class="sub"><span id="place"></span><br>Kuma River flood, 4 July 2020 · 30 m grid</p>
+
+  <h2>Layer</h2>
+  <div id="modes" role="group" aria-label="Data layer"></div>
+  <p id="mode-note"></p>
+
+  <div class="row" id="threshold-row" hidden>
+    <label for="threshold">Risk threshold <output id="threshold-value"></output></label>
+    <input id="threshold" type="range" min="0.05" max="0.95" step="0.01">
+    <button class="link" id="threshold-reset" type="button">Reset to the operating point</button>
+  </div>
+  <div class="row" id="hand-row" hidden>
+    <label for="hand">Height above channel <output id="hand-value"></output></label>
+    <input id="hand" type="range" min="0" max="15" step="0.25">
+  </div>
+
+  <div id="stats" aria-live="polite"></div>
+
+  <div class="legend" id="legend-risk" hidden>
+    <div class="bar"></div>
+    <div class="ends"><span>low risk</span><span>high risk</span></div>
+  </div>
+  <div class="legend" id="legend-observed" hidden>
+    <div class="key"><span class="sw" style="background:#409cff"></span>Flooded on 4 July 2020</div>
+    <div class="key"><span class="sw" style="background:#1c3a6e"></span>Permanent water</div>
+  </div>
+  <div class="legend" id="legend-compare" hidden>
+    <div class="key"><span class="sw" style="background:var(--hit)"></span>Flagged and flooded (caught)</div>
+    <div class="key"><span class="sw" style="background:var(--miss)"></span>Flooded but not flagged (missed)</div>
+    <div class="key"><span class="sw" style="background:var(--fa)"></span>Flagged but stayed dry (false alarm)</div>
+  </div>
+
+  <h2>Show</h2>
+  <div class="checks">
+    <label><input id="show-assets" type="checkbox" checked><span class="dot" style="background:#ff5a3c"></span>Client assets (red = flagged by the model)</label>
+    <label><input id="show-facilities" type="checkbox" checked><span class="dot" style="background:#b89bff"></span>Critical facilities (OpenStreetMap)</label>
+    <label><input id="show-river" type="checkbox" checked><span class="dot" style="background:#8fd3ff"></span>River network</label>
+  </div>
+
+  <div class="row">
+    <label for="exaggeration">Vertical exaggeration <output id="exaggeration-value"></output></label>
+    <input id="exaggeration" type="range" min="1" max="5" step="0.5">
+  </div>
+
+  <div class="actions">
+    <button id="tour" type="button">Play tour</button>
+    <button id="home" type="button">Reset view</button>
+  </div>
+  <p class="foot">Drag to orbit, scroll to zoom, right-drag to pan. Hover a pin for details.<br>
+    Elevation, flood extent, river and facilities are real public data. The client portfolio is simulated.
+    Built from the pipeline's own outputs by <code>scripts/export_viewer.py</code>.</p>
+</aside>
+
+<div id="caption" hidden></div>
+<div id="tip" hidden></div>
+<script type="module" src="viewer.js"></script>
+</body>
+</html>
